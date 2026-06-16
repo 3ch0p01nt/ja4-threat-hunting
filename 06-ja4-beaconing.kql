@@ -15,14 +15,14 @@ let minIntervalSec = 30;
 let maxIntervalSec = 172800;   // up to 2 days (covers daily call-homes)
 let minBeaconScore = 50;
 let minRarity = 0.7;           // combined rarity: few hosts AND few connections
-let ssl = materialize(
+let ssl =
     DeviceNetworkEvents
     | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
     | extend AF = todynamic(AdditionalFields)
     | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
     | where isnotempty(ja4_)
     | extend Dest = iff(isnotempty(sni), sni, RemoteIP)
-    | project Timestamp, DeviceId, DeviceName, RemoteIP, ja4_, Dest);
+    | project Timestamp, DeviceId, DeviceName, RemoteIP, ja4_, Dest;
 let totalDevices = toscalar(ssl | summarize dcount(DeviceId));
 let totalConns   = toscalar(ssl | count);
 let rarity = ssl | summarize Devs = dcount(DeviceId), Conns = count() by ja4_

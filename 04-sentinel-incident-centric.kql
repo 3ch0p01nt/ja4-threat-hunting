@@ -14,21 +14,21 @@ let kdecay = 2.0;
 let wFlow  = 15m;
 let wHost  = 2h;
 let minFidelity = 20;
-let ja4conn = materialize(
+let ja4conn =
     DeviceNetworkEvents
     | where TimeGenerated > ago(lookback)
     | where ActionType == "SslConnectionInspected"
     | extend AF = todynamic(AdditionalFields)
     | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
     | where isnotempty(ja4_) or isnotempty(ja4s_)
-    | project cTime = TimeGenerated, DeviceId, RemoteIP, sni, ja4_, ja4s_);
+    | project cTime = TimeGenerated, DeviceId, RemoteIP, sni, ja4_, ja4s_;
 let incMap =
     SecurityIncident
     | where TimeGenerated > ago(lookback)
     | summarize arg_max(TimeGenerated, Title, Severity, AlertIds) by IncidentNumber
     | mv-expand SystemAlertId = todynamic(AlertIds) to typeof(string)
     | project IncidentNumber, IncidentTitle = Title, IncidentSeverity = Severity, SystemAlertId;
-let alertMeta = materialize( SecurityAlert | where TimeGenerated > ago(lookback) | project SystemAlertId, ATime = TimeGenerated, Entities);
+let alertMeta = SecurityAlert | where TimeGenerated > ago(lookback) | project SystemAlertId, ATime = TimeGenerated, Entities;
 let aDev = alertMeta | mv-expand e = todynamic(Entities) | extend mdatp = tostring(e.MdatpDeviceId) | where isnotempty(mdatp) | project SystemAlertId, ATime, aDev = mdatp;
 let aIp  = alertMeta | mv-expand e = todynamic(Entities) | extend addr  = tostring(e.Address)       | where isnotempty(addr)  | project SystemAlertId, ATime, aIp  = addr;
 let mDev =

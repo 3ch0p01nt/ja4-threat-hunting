@@ -13,7 +13,7 @@
 // ============================================================================
 let lookback = 30d;
 let minRarity = 0.7;   // combined rarity: few hosts AND few connections (raise toward 1.0 to tighten)
-let ssl = materialize(
+let ssl =
     DeviceNetworkEvents
     | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
     | extend AF = todynamic(AdditionalFields)
@@ -22,7 +22,7 @@ let ssl = materialize(
     | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
     | extend selfSignedPub = (isnotempty(issuer) and issuer == subject and isPublic),
              sniIsIpPub = ((sni matches regex @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$") and isPublic)
-    | project Timestamp, DeviceId, RemoteIP, RemotePort, ja4_, ja4s_, sni, issuer, isPublic, selfSignedPub, sniIsIpPub);
+    | project Timestamp, DeviceId, RemoteIP, RemotePort, ja4_, ja4s_, sni, issuer, isPublic, selfSignedPub, sniIsIpPub;
 let totalDevices = toscalar(ssl | summarize dcount(DeviceId));
 let totalConns   = toscalar(ssl | count);
 // recover the process behind the JA4 via ConnectionSuccess (same flow, +-180s)
