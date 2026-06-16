@@ -77,6 +77,16 @@ The workbook name is a **deterministic GUID** (`guid(resourceGroup().id, display
 re-running the deployment **updates the same workbook in place**. To ship a new version of the
 queries, replace `workbook-content.json` and redeploy.
 
+## Performance
+The KQL `materialize()`s its base `DeviceNetworkEvents` / `SecurityAlert` scans, so each heavy table is
+read **once per run** instead of 6-7x — the dominant cost on large workspaces.
+
+For very high-volume IL5 workspaces, the next step is **staging**: schedule a **Log Analytics Summary Rule**
+(`Microsoft.OperationalInsights/workspaces/summaryLogs`) to roll the raw scan + joins into small `*_CL`
+tables on a cadence (hourly/daily), then repoint the workbook at those tables so it reads pre-aggregated
+data. (Verify Summary Rules availability in your IL5 enclave; the universal fallback is an Automation
+runbook / Logic App that writes the rollups via the **Logs Ingestion API + DCR**.)
+
 ## Notes for Azure Government / IL5
 - The templates contain **no cloud-specific endpoints** — they deploy through whatever ARM
   endpoint your CLI/PowerShell context targets, so selecting `AzureUSGovernment` is all that’s needed.

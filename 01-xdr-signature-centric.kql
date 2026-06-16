@@ -18,14 +18,14 @@ let tau    = 2h;  // decay lifetime
 let kdecay = 2.0;  // decay speed (convex)
 let wFlow  = 15m;   // flow-exact window (device + dest IP + this close = top tier)
 let wHost  = 2h;  // host+time window (same host, contemporaneous)
-let ja4conn =
+let ja4conn = materialize(
     DeviceNetworkEvents
     | where Timestamp > ago(lookback)
     | where ActionType == "SslConnectionInspected"
     | extend AF = todynamic(AdditionalFields)
     | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
     | where isnotempty(ja4_) or isnotempty(ja4s_)
-    | project cTime = Timestamp, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_;
+    | project cTime = Timestamp, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_);
 let aeDev = AlertEvidence | where Timestamp > ago(lookback) and isnotempty(DeviceId)
             | project AlertId, aDeviceId = DeviceId, ATime = Timestamp, Title, Severity;
 let aeIp  = AlertEvidence | where Timestamp > ago(lookback) and isnotempty(RemoteIP)
