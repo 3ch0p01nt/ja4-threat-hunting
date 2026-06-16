@@ -1,0 +1,53 @@
+// ============================================================================
+// 06 - JA4 BEACONING DETECTOR  (E5 / Defender XDR-native)
+// ----------------------------------------------------------------------------
+// Finds regular-interval (low-jitter) TLS call-homes per (device, JA4, dest) -
+// the classic C2 beacon shape. Keyed on destination = SNI (falls back to RemoteIP
+// for no-SNI / IP-literal C2), which is robust to cloud IP rotation.
+// BeaconScore = 100 * (1 - coefficient_of_variation); a perfectly periodic beacon
+// scores ~100. A RARE JA4 beaconing to a NON-corporate dest is the top lead.
+// NOTE: benign telemetry (MS Delivery Optimization, AV, browsers) also beacons -
+// triage by Dest/Rarity. Tunables: minConns, interval band, score floor.
+// ============================================================================
+let lookback = 30d;
+let minConns = 8;
+let minIntervalSec = 30;
+let maxIntervalSec = 172800;   // up to 2 days (covers daily call-homes)
+let minBeaconScore = 50;
+let minRarity = 0.7;           // combined rarity: few hosts AND few connections
+let ssl =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_)
+    | extend Dest = iff(isnotempty(sni), sni, RemoteIP)
+    | project Timestamp, DeviceId, DeviceName, RemoteIP, ja4_, Dest;
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId));
+let totalConns   = toscalar(ssl | count);
+let rarity = ssl | summarize Devs = dcount(DeviceId), Conns = count() by ja4_
+    | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend Rarity = min_of(Rhost, Rconn);
+ssl
+| sort by DeviceId asc, ja4_ asc, Dest asc, Timestamp asc
+| serialize
+| extend grp = strcat(DeviceId, "|", ja4_, "|", Dest)
+| extend delta = iff(prev(grp) == grp, datetime_diff('second', Timestamp, prev(Timestamp)), long(null))
+| where isnotnull(delta) and delta > 0
+| summarize Intervals = count(), MeanSec = avg(delta), StdevSec = stdev(delta),
+            SampleRemoteIP = take_any(RemoteIP), DeviceName = take_any(DeviceName),
+            FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+        by DeviceId, ja4_, Dest
+| extend Connections = Intervals + 1
+| where Connections >= minConns and MeanSec between (minIntervalSec .. maxIntervalSec)
+| extend CV = iff(MeanSec == 0, 1.0, StdevSec / MeanSec)
+| extend BeaconScore = toint(round(100.0 * (1.0 - min_of(1.0, CV))))
+| where BeaconScore >= minBeaconScore
+| join kind=leftouter rarity on ja4_
+| where Rarity >= minRarity
+| project DeviceName, ja4_, Dest, SampleRemoteIP, BeaconScore, Connections,
+          MeanIntervalMin = round(MeanSec / 60.0, 1), JitterCV = round(CV, 2),
+          Rarity = round(Rarity, 2), SpanHours = round(datetime_diff('minute', LastSeen, FirstSeen) / 60.0, 1),
+          FirstSeen, LastSeen
+| sort by BeaconScore desc, Rarity desc, Connections desc

@@ -1,0 +1,19 @@
+// ============================================================================
+// 00 - DISCOVERY: confirm the AdditionalFields keys on inspected TLS
+//      Platform: Microsoft Defender XDR > Advanced Hunting
+// ----------------------------------------------------------------------------
+// Run this first. Your SslConnectionInspected records are Zeek/Corelight-style
+// SSL logs; besides ja4 / ja4s they also carry ja3, ja3s, server_name (SNI),
+// cipher, issuer, subject, curve, next_protocol, uid, etc. This lists the exact
+// key names so the other queries reference them correctly.
+// NOTE: via API/Sentinel, AdditionalFields is a STRING - parse with todynamic().
+//       In the Defender portal it is already dynamic, but todynamic() is safe.
+// ============================================================================
+DeviceNetworkEvents
+| where Timestamp > ago(3d)
+| where ActionType == "SslConnectionInspected"
+| take 5000
+| extend AF = todynamic(AdditionalFields)
+| mv-expand key = bag_keys(AF) to typeof(string)
+| summarize Count = count() by key
+| sort by Count desc

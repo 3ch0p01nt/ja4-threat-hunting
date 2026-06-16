@@ -1,0 +1,84 @@
+// ============================================================================
+// 01 - JA4 / JA4S signature stack, INCIDENT-MATCH FIDELITY SCORED
+//      Platform: Microsoft Defender XDR > Advanced Hunting
+// ----------------------------------------------------------------------------
+// MatchFidelity (0-100) = 100 * Specificity * TemporalDecay * Rarity * SeverityWeight
+//   Specificity  : flow-exact(1.0) > host+time(0.85) > host-any(0.6) > shared-IP(0.35)
+//                  - entity + flow proximity (detection-engineering proximity scoring)
+//   TemporalDecay: MISP polynomial  max(floor, 1 - (dt/tau)^k),  dt = |conn - alert|
+//   Rarity       : inverse host-prevalence (IDF) log(N/n)/log(N) - down-weights
+//                  ubiquitous fingerprints (JA4 is shared across same TLS stacks)
+// Bands: 75-100 High | 40-74 Medium | 20-39 Low | 1-19 Informational | 0 None
+// Sources: MISP decaying models; Pyramid of Pain; JA4 prevalence (rarity); STIX/Recorded Future.
+// NB: AdvancedHunting retains alerts ~30d, so dt (hence decay) maxes near tau here.
+// ============================================================================
+let lookback = 30d;
+let minRarity = 0.7;   // combined rarity gate (few hosts AND few connections)
+let tau    = 2h;  // decay lifetime
+let kdecay = 2.0;  // decay speed (convex)
+let wFlow  = 15m;   // flow-exact window (device + dest IP + this close = top tier)
+let wHost  = 2h;  // host+time window (same host, contemporaneous)
+let ja4conn =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback)
+    | where ActionType == "SslConnectionInspected"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) or isnotempty(ja4s_)
+    | project cTime = Timestamp, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_;
+let aeDev = AlertEvidence | where Timestamp > ago(lookback) and isnotempty(DeviceId)
+            | project AlertId, aDeviceId = DeviceId, ATime = Timestamp, Title, Severity;
+let aeIp  = AlertEvidence | where Timestamp > ago(lookback) and isnotempty(RemoteIP)
+            | project AlertId, aRemoteIP = RemoteIP, ATime = Timestamp, Title, Severity;
+let alertUser = AlertEvidence | where Timestamp > ago(lookback) and isnotempty(AccountUpn)
+            | summarize AlertUserStr = strcat_array(make_set(AccountUpn, 5), ", ") by AlertId;
+// Device-linked matches; flow-exact when the same alert also cites the conn's dest IP within wFlow
+let mDev =
+    ja4conn
+    | join kind=inner aeDev on $left.DeviceId == $right.aDeviceId
+    | extend dt = abs(cTime - ATime)
+    | join kind=leftouter (aeIp | project AlertId, aRemoteIP) on $left.AlertId == $right.AlertId, $left.RemoteIP == $right.aRemoteIP
+    | extend Stier = case(isnotempty(aRemoteIP) and dt <= wFlow, 1.0, dt <= wHost, 0.85, 0.60)
+    | project ja4_, ja4s_, AlertId, Title, Severity, dt, Stier;
+// IP-only matches (shared destination IP)
+let mIp =
+    ja4conn
+    | join kind=inner aeIp on $left.RemoteIP == $right.aRemoteIP
+    | extend dt = abs(cTime - ATime)
+    | extend Stier = 0.35
+    | project ja4_, ja4s_, AlertId, Title, Severity, dt, Stier;
+let matchesAll =
+    union mDev, mIp
+    | extend D = max_of(0.02, 1.0 - pow(dt / tau, kdecay))
+    | extend rowScore = Stier * D * case(Severity == "High", 1.0, Severity == "Medium", 0.7, Severity == "Low", 0.45, 0.2);
+let bestPerPair = matchesAll | summarize arg_max(rowScore, AlertId, Title, Severity, Stier, dt) by ja4_, ja4s_;
+let allAgg =
+    matchesAll
+    | distinct ja4_, ja4s_, AlertId
+    | join kind=leftouter alertUser on AlertId
+    | summarize LinkedAlerts = dcount(AlertId), LinkedIdentities = make_set_if(AlertUserStr, isnotempty(AlertUserStr), 6) by ja4_, ja4s_;
+let totalDevices = toscalar(ja4conn | summarize dcount(DeviceId));
+let totalConns   = toscalar(ja4conn | count);
+let rarity =
+    ja4conn
+    | summarize Devs = dcount(DeviceId), Conns = count() by ja4_, ja4s_
+    | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn);
+ja4conn
+| summarize TotalConnections = count(), DistinctDevices = dcount(DeviceId), DistinctRemoteIPs = dcount(RemoteIP),
+            SampleSNIs = make_set(sni, 6), FirstSeen = min(cTime), LastSeen = max(cTime)
+        by ja4_, ja4s_
+| join kind=leftouter rarity      on ja4_, ja4s_
+| where R >= minRarity
+| join kind=leftouter bestPerPair on ja4_, ja4s_
+| join kind=leftouter allAgg      on ja4_, ja4s_
+| extend R = coalesce(R, 1.0), BestScore = coalesce(rowScore, 0.0), LinkedAlerts = coalesce(LinkedAlerts, 0)
+| extend MatchFidelity = toint(round(100.0 * BestScore * R))
+| extend FidelityBand = case(MatchFidelity >= 75, "High", MatchFidelity >= 40, "Medium", MatchFidelity >= 20, "Low", MatchFidelity > 0, "Informational", "None")
+| extend MatchTier = case(Stier == 1.0, "flow-exact", Stier == 0.85, "host+time", Stier == 0.6, "host-any", Stier == 0.35, "shared-ip", "none")
+| extend ClosestMatch = dt
+| project ja4_, ja4s_, MatchFidelity, FidelityBand, MatchTier, DrivingAlert = Title, DrivingSeverity = Severity,
+          ClosestMatch, LinkedAlerts, LinkedIdentities, Rarity = round(R, 2),
+          TotalConnections, DistinctDevices, DistinctRemoteIPs, SampleSNIs, FirstSeen, LastSeen
+| sort by MatchFidelity desc, DistinctDevices asc, TotalConnections asc

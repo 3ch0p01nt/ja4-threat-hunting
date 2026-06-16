@@ -1,0 +1,256 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# JA4 / JA4S Threat-Hunting Workbook\r\n\r\nSurfaces the most interesting TLS-fingerprint activity in this workspace and explains **why** each item is interesting. Runs on Defender data streamed here (`DeviceNetworkEvents` SslConnectionInspected, `SecurityIncident`/`SecurityAlert`, `ConnectionSuccess` process data).\r\n\r\n**How items are scored**\r\n- **Rarity** = combined: rare only if on **few hosts AND few connections**. The **Min rarity** slider focuses every section on the rare tail.\r\n- **Incident-match fidelity** = proximity (flow-exact > host+time > host-any > shared-IP) x temporal decay x rarity.\r\n- **Malice signals** = JA4 structure (no-SNI / no-ALPN / legacy TLS), process attribution (LOLBIN / user-path), cert anomalies (self-signed / IP-SNI / free CA).\r\n- **Beaconing** = low-jitter periodic call-homes.\r\n\r\nPick a **Lookback** window and a **Min rarity** focus below (default *Rare* = few hosts AND few connections), then start at **Section 2 (Top Prioritized Leads)**."
+      },
+      "name": "intro"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "version": "KqlParameterItem/1.0",
+            "name": "Lookback",
+            "label": "Lookback window",
+            "type": 2,
+            "isRequired": true,
+            "typeSettings": {
+              "additionalResourceOptions": []
+            },
+            "jsonData": "[{\"value\":\"7d\",\"label\":\"7 days\"},{\"value\":\"14d\",\"label\":\"14 days\"},{\"value\":\"30d\",\"label\":\"30 days\",\"selected\":true},{\"value\":\"60d\",\"label\":\"60 days\"},{\"value\":\"90d\",\"label\":\"90 days\"}]",
+            "value": "30d"
+          },
+          {
+            "version": "KqlParameterItem/1.0",
+            "name": "MinRarity",
+            "label": "Min rarity (focus)",
+            "type": 2,
+            "isRequired": true,
+            "typeSettings": {
+              "additionalResourceOptions": []
+            },
+            "jsonData": "[{\"value\":\"0.0\",\"label\":\"All\"},{\"value\":\"0.5\",\"label\":\"Uncommon (0.5)\"},{\"value\":\"0.7\",\"label\":\"Rare (0.7)\",\"selected\":true},{\"value\":\"0.85\",\"label\":\"Very rare (0.85)\"},{\"value\":\"0.95\",\"label\":\"Singletons (0.95)\"}]",
+            "value": "0.7"
+          }
+        ],
+        "style": "pills",
+        "queryType": 0
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 1. Summary\nAt-a-glance counts. **Rare pairs** and **self-signed certs** are where to start."
+      },
+      "name": "h1"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Workbook: summary tiles (rare-focused)\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),\r\n             issuer = tostring(AF.issuer), subject = tostring(AF.subject)\r\n    | extend selfSigned = (isnotempty(issuer) and issuer == subject), noSNI = (substring(ja4_, 3, 1) == \"i\");\r\nlet totalDevices = toscalar(ssl | summarize dcount(DeviceId));\r\nlet totalConns   = toscalar(ssl | count);\r\nlet pairs = ssl | summarize Conns = count(), Devs = dcount(DeviceId), AnySelf = max(selfSigned), AnyNoSNI = max(noSNI) by ja4_, ja4s_\r\n    | extend R = min_of(iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices)))),\r\n                        iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns)))));\r\nunion\r\n (pairs | summarize Value = count() | extend Metric = \"JA4 x JA4S pairs (all)\", Sort = 1),\r\n (pairs | where R >= minRarity | summarize Value = count() | extend Metric = \"Rare pairs (focus)\", Sort = 2),\r\n (pairs | where R >= minRarity and AnySelf | summarize Value = count() | extend Metric = \"Rare + self-signed\", Sort = 3),\r\n (pairs | where R >= minRarity and AnyNoSNI | summarize Value = count() | extend Metric = \"Rare + no-SNI\", Sort = 4),\r\n (ssl | summarize Value = dcount(sni) | extend Metric = \"Distinct destinations\", Sort = 5)\r\n| project Metric, Value, Sort\r\n| sort by Sort asc\r\n",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Metric",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Value",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "blue"
+            }
+          },
+          "showBorder": false,
+          "size": "auto"
+        }
+      },
+      "name": "q-tiles"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 2. Top Prioritized Leads - what's interesting and why\nThe highest-signal items across all engines, ranked. **Why** explains each: a suspicious fingerprint, a fingerprint tied to an incident's device/IP, or a periodic call-home. Work the top (red) rows first."
+      },
+      "name": "h2"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Workbook: TOP PRIORITIZED LEADS (high-fidelity) - strongest signal per engine\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),\r\n             issuer = tostring(AF.issuer), subject = tostring(AF.subject)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | extend selfSignedPub = (isnotempty(issuer) and issuer == subject and isPublic),\r\n             sniIsIpPub = ((sni matches regex @\"^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$\") and isPublic)\r\n    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, ja4s_, sni, isPublic, selfSignedPub, sniIsIpPub;\r\nlet totalDevices = toscalar(ssl | summarize dcount(DeviceId));\r\nlet totalConns   = toscalar(ssl | count);\r\nlet rar = ssl | summarize Devs = dcount(DeviceId), Conns = count() by ja4_, ja4s_\r\n    | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))\r\n    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))\r\n    | extend R = min_of(Rhost, Rconn);\r\nlet procs =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"ConnectionSuccess\" and isnotempty(InitiatingProcessFileName)\r\n    | extend Proc = tolower(InitiatingProcessFileName), ProcPath = tolower(InitiatingProcessFolderPath)\r\n    | extend isLolbin = Proc in (\"rundll32.exe\",\"regsvr32.exe\",\"mshta.exe\",\"powershell.exe\",\"pwsh.exe\",\"wscript.exe\",\"cscript.exe\",\"certutil.exe\",\"bitsadmin.exe\",\"msbuild.exe\",\"installutil.exe\",\"cmstp.exe\",\"wmic.exe\"),\r\n             isUserPath = (ProcPath startswith \"c:\\\\users\\\\\" or ProcPath has \"appdata\\\\local\\\\temp\" or ProcPath has \"\\\\downloads\\\\\" or ProcPath has \"appdata\\\\roaming\")\r\n    | project DeviceId, RemoteIP, RemotePort, pTime = TimeGenerated, isLolbin, isUserPath;\r\nlet procPair = ssl | join kind=inner procs on DeviceId, RemoteIP, RemotePort | where abs(datetime_diff('second', TimeGenerated, pTime)) <= 180\r\n    | summarize AnyLolbin = max(isLolbin), AnyUserPath = max(isUserPath) by ja4_, ja4s_;\r\n// ---- engine 1: suspicious fingerprints (rare + corroborated + public-dest) ----\r\nlet triage =\r\n    ssl\r\n    | summarize Devs = dcount(DeviceId), AnySelf = max(selfSignedPub), AnyIp = max(sniIsIpPub), AnyPublic = max(isPublic), SNIs = make_set(sni, 3), LastSeen = max(TimeGenerated) by ja4_, ja4s_\r\n    | join kind=leftouter rar on ja4_, ja4s_\r\n    | where R >= minRarity\r\n    | join kind=leftouter procPair on ja4_, ja4s_\r\n    | extend AnyLolbin = coalesce(AnyLolbin, false), AnyUserPath = coalesce(AnyUserPath, false)\r\n    | extend legacy = (substring(ja4_, 1, 2) in (\"10\",\"11\",\"s3\",\"s2\")), noSNI = (substring(ja4_, 3, 1) == \"i\" and AnyPublic), noALPN = (substring(ja4_, 8, 2) == \"00\" and AnyPublic)\r\n    | extend StrongCount = iff(AnyLolbin,1,0) + iff(legacy,1,0) + iff(AnySelf,1,0), WeakCount = iff(noSNI,1,0) + iff(noALPN,1,0) + iff(AnyUserPath,1,0) + iff(AnyIp,1,0)\r\n    | where StrongCount >= 1 or WeakCount >= 2\r\n    | extend Score = toint(min_of(100, iff(AnyLolbin,35,0) + iff(legacy,25,0) + iff(AnySelf,30,0) + iff(AnyIp,15,0) + iff(noSNI,12,0) + iff(AnyUserPath,12,0) + iff(noALPN,8,0)))\r\n    | where Score >= 30\r\n    | extend Reasons = set_difference(pack_array(iff(AnyLolbin,\"LOLBIN process\",\"\"), iff(legacy,\"legacy TLS\",\"\"), iff(AnySelf,\"self-signed cert (public)\",\"\"), iff(AnyIp,\"SNI=IP (public)\",\"\"), iff(AnyUserPath,\"user/temp-path process\",\"\"), iff(noSNI,\"no-SNI\",\"\"), iff(noALPN,\"no-ALPN\",\"\")), dynamic([\"\"]))\r\n    | project Category = \"Suspicious fingerprint\", Score, JA4 = strcat(ja4_, \"  /  \", ja4s_), Why = strcat_array(Reasons, \"; \"), Where = strcat_array(SNIs, \", \"), Detail = strcat(Devs, \" host(s)\"), LastSeen;\r\n// ---- engine 2: beaconing (rare fingerprints only) ----\r\nlet beacon =\r\n    ssl | extend Dest = iff(isnotempty(sni), sni, RemoteIP)\r\n    | sort by DeviceId asc, ja4_ asc, Dest asc, TimeGenerated asc\r\n    | serialize\r\n    | extend grp = strcat(DeviceId, \"|\", ja4_, \"|\", Dest)\r\n    | extend delta = iff(prev(grp) == grp, datetime_diff('second', TimeGenerated, prev(TimeGenerated)), long(null))\r\n    | where isnotnull(delta) and delta > 0\r\n    | summarize Intervals = count(), MeanSec = avg(delta), StdevSec = stdev(delta), Dev = take_any(DeviceName), LastSeen = max(TimeGenerated) by ja4_, Dest\r\n    | extend Conns = Intervals + 1, CV = iff(MeanSec == 0, 1.0, StdevSec / MeanSec)\r\n    | where Conns >= 8 and MeanSec between (30 .. 172800)\r\n    | extend BScore = toint(round(100.0 * (1.0 - min_of(1.0, CV))))\r\n    | where BScore >= 70\r\n    | join kind=leftouter (ssl | summarize Devs = dcount(DeviceId), Conns = count() by ja4_ | extend Rj = min_of(iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices)))), iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns)))))) on ja4_\r\n    | where Rj >= minRarity\r\n    | project Category = \"Beaconing call-home\", Score = BScore, JA4 = ja4_, Why = strcat(\"periodic ~every \", toint(MeanSec / 60), \" min, low jitter (CV \", round(CV, 2), \"), \", Conns, \" conns\"), Where = Dest, Detail = Dev, LastSeen;\r\n// ---- engine 3: incident match (tight windows + severity-weighted) ----\r\nlet incMap = SecurityIncident | where TimeGenerated > ago(lookback) | summarize arg_max(TimeGenerated, Title, Severity, AlertIds) by IncidentNumber | mv-expand SystemAlertId = todynamic(AlertIds) to typeof(string) | project IncidentNumber, ITitle = Title, ISev = Severity, SystemAlertId;\r\nlet alertMeta = SecurityAlert | where TimeGenerated > ago(lookback) | project SystemAlertId, ATime = TimeGenerated, Entities;\r\nlet aDev = alertMeta | mv-expand e = todynamic(Entities) | extend m = tostring(e.MdatpDeviceId) | where isnotempty(m) | project SystemAlertId, ATime, aDev = m;\r\nlet aIp  = alertMeta | mv-expand e = todynamic(Entities) | extend a = tostring(e.Address) | where isnotempty(a) | project SystemAlertId, ATime, aIp = a;\r\nlet md = ssl | join kind=inner aDev on $left.DeviceId == $right.aDev | extend dt = abs(datetime_diff('second', TimeGenerated, ATime))\r\n    | join kind=leftouter (aIp | project SystemAlertId, aIp) on $left.SystemAlertId == $right.SystemAlertId, $left.RemoteIP == $right.aIp\r\n    | extend Stier = case(isnotempty(aIp) and dt <= 900, 1.0, dt <= 7200, 0.85, 0.60) | project ja4_, ja4s_, SystemAlertId, dt, Stier, cT = TimeGenerated;\r\nlet mi = ssl | join kind=inner aIp on $left.RemoteIP == $right.aIp | extend dt = abs(datetime_diff('second', TimeGenerated, ATime)) | extend Stier = 0.35 | project ja4_, ja4s_, SystemAlertId, dt, Stier, cT = TimeGenerated;\r\nlet fidelity =\r\n    union md, mi\r\n    | join kind=inner incMap on SystemAlertId\r\n    | extend SevW = case(ISev == \"High\", 1.0, ISev == \"Medium\", 0.7, ISev == \"Low\", 0.45, 0.2)\r\n    | extend rowScore = Stier * max_of(0.02, 1.0 - pow(todouble(dt) / 7200.0, 2)) * SevW\r\n    | summarize arg_max(rowScore, IncidentNumber, ITitle, Stier, dt, cT) by ja4_, ja4s_\r\n    | join kind=leftouter rar on ja4_, ja4s_\r\n    | extend MatchFidelity = toint(round(100.0 * rowScore * coalesce(R, 1.0)))\r\n    | where MatchFidelity >= 40\r\n    | extend MatchTier = case(Stier == 1.0, \"flow-exact\", Stier == 0.85, \"host+time\", Stier == 0.6, \"host-any\", \"shared-ip\")\r\n    | project Category = \"Matches an incident\", Score = MatchFidelity, JA4 = strcat(ja4_, \"  /  \", ja4s_), Why = strcat(MatchTier, \" match to incident #\", IncidentNumber, \" (\", ITitle, \"), \", toint(dt / 60), \" min from alert\"), Where = ITitle, Detail = strcat(\"incident #\", IncidentNumber), LastSeen = cT;\r\nunion triage, beacon, fidelity\r\n| sort by Score desc, LastSeen desc\r\n| take 50\r\n",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Score",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "red"
+              }
+            }
+          ]
+        }
+      },
+      "name": "q-leads"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 3. Suspicious rare JA4 - triage\nEvery JA4 x JA4S pair scored for maliciousness. **Verdict / Reasons** say *why* (LOLBIN process, self-signed cert, no-SNI...). **Procs** is the process behind the fingerprint (recovered via ConnectionSuccess)."
+      },
+      "name": "h3"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// ============================================================================\r\n// 05 - RARE JA4 MALICE TRIAGE  (E5 / Defender XDR-native, no external feeds)\r\n//      HIGH-FIDELITY: rarity-gated + corroboration-required + public-dest only\r\n// ----------------------------------------------------------------------------\r\n// Flags a JA4 x JA4S pair only if it is RARE (R >= minRarity) AND has either one\r\n// STRONG signal or 2+ WEAK signals - which cuts benign noise (common fingerprints,\r\n// LAN appliances/printers, ubiquitous CAs like Let's Encrypt).\r\n//   Strong : LOLBIN process | legacy TLS (<1.2) | self-signed cert to PUBLIC dest\r\n//   Weak   : no-SNI (public) | no-ALPN (public) | user/temp-path proc | SNI=IP (public)\r\n// Cert/structural signals count only for PUBLIC destinations, so internal\r\n// printers / appliances / localhost are suppressed.\r\n// Sources: JA4 spec (structure decode); LOLBAS; Pyramid of Pain.\r\n// ============================================================================\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};   // combined rarity: few hosts AND few connections (raise toward 1.0 to tighten)\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),\r\n             issuer = tostring(AF.issuer), subject = tostring(AF.subject)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | extend selfSignedPub = (isnotempty(issuer) and issuer == subject and isPublic),\r\n             sniIsIpPub = ((sni matches regex @\"^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$\") and isPublic)\r\n    | project TimeGenerated, DeviceId, RemoteIP, RemotePort, ja4_, ja4s_, sni, issuer, isPublic, selfSignedPub, sniIsIpPub;\r\nlet totalDevices = toscalar(ssl | summarize dcount(DeviceId));\r\nlet totalConns   = toscalar(ssl | count);\r\n// recover the process behind the JA4 via ConnectionSuccess (same flow, +-180s)\r\nlet procs =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"ConnectionSuccess\" and isnotempty(InitiatingProcessFileName)\r\n    | extend Proc = tolower(InitiatingProcessFileName), ProcPath = tolower(InitiatingProcessFolderPath)\r\n    | extend isLolbin = Proc in (\"rundll32.exe\",\"regsvr32.exe\",\"mshta.exe\",\"powershell.exe\",\"pwsh.exe\",\"wscript.exe\",\"cscript.exe\",\"certutil.exe\",\"bitsadmin.exe\",\"msbuild.exe\",\"installutil.exe\",\"regasm.exe\",\"regsvcs.exe\",\"cmstp.exe\",\"wmic.exe\",\"hh.exe\")\r\n    | extend isUserPath = (ProcPath startswith \"c:\\\\users\\\\\" or ProcPath has \"appdata\\\\local\\\\temp\" or ProcPath has \"\\\\downloads\\\\\" or ProcPath has \"appdata\\\\roaming\")\r\n    | project DeviceId, RemoteIP, RemotePort, pTime = TimeGenerated, Proc, isLolbin, isUserPath;\r\nlet procPair =\r\n    ssl\r\n    | join kind=inner procs on DeviceId, RemoteIP, RemotePort\r\n    | where abs(datetime_diff('second', TimeGenerated, pTime)) <= 180\r\n    | summarize AnyLolbin = max(isLolbin), AnyUserPath = max(isUserPath), Procs = make_set(Proc, 8) by ja4_, ja4s_;\r\nssl\r\n| summarize TotalConnections = count(), DistinctDevices = dcount(DeviceId), DistinctRemoteIPs = dcount(RemoteIP),\r\n            AnySelfSignedPub = max(selfSignedPub), AnySniIpPub = max(sniIsIpPub), AnyPublic = max(isPublic),\r\n            SampleSNIs = make_set(sni, 5), Issuers = make_set(issuer, 3), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\r\n        by ja4_, ja4s_\r\n| extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(DistinctDevices)) / log(todouble(totalDevices))))\r\n| extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(TotalConnections)) / log(todouble(totalConns))))\r\n| extend R = min_of(Rhost, Rconn)                       // combined: rare on BOTH axes\r\n| where R >= minRarity                                  // RARITY GATE\r\n| join kind=leftouter procPair on ja4_, ja4s_\r\n| extend AnyLolbin = coalesce(AnyLolbin, false), AnyUserPath = coalesce(AnyUserPath, false)\r\n| extend legacy = (substring(ja4_, 1, 2) in (\"10\", \"11\", \"s3\", \"s2\")),\r\n         noSNI = (substring(ja4_, 3, 1) == \"i\" and AnyPublic), noALPN = (substring(ja4_, 8, 2) == \"00\" and AnyPublic)\r\n| extend StrongCount = iff(AnyLolbin, 1, 0) + iff(legacy, 1, 0) + iff(AnySelfSignedPub, 1, 0),\r\n         WeakCount   = iff(noSNI, 1, 0) + iff(noALPN, 1, 0) + iff(AnyUserPath, 1, 0) + iff(AnySniIpPub, 1, 0)\r\n| where StrongCount >= 1 or WeakCount >= 2              // CORROBORATION\r\n| extend SuspicionScore = min_of(100, iff(AnyLolbin, 35, 0) + iff(legacy, 25, 0) + iff(AnySelfSignedPub, 30, 0)\r\n      + iff(AnySniIpPub, 15, 0) + iff(noSNI, 12, 0) + iff(AnyUserPath, 12, 0) + iff(noALPN, 8, 0))\r\n| extend Reasons = set_difference(pack_array(\r\n        iff(AnyLolbin, \"LOLBIN process\", \"\"), iff(legacy, \"legacy TLS\", \"\"),\r\n        iff(AnySelfSignedPub, \"self-signed cert (public dest)\", \"\"), iff(AnySniIpPub, \"SNI=IP literal (public)\", \"\"),\r\n        iff(AnyUserPath, \"user/temp-path process\", \"\"), iff(noSNI, \"no-SNI (public)\", \"\"), iff(noALPN, \"no-ALPN (public)\", \"\")), dynamic([\"\"]))\r\n| extend Verdict = case(SuspicionScore >= 50, \"High\", SuspicionScore >= 30, \"Medium\", \"Low\")\r\n| project ja4_, ja4s_, Verdict, SuspicionScore, Reasons, Procs, SampleSNIs, Issuers,\r\n          Rarity = round(R, 2), DistinctDevices, DistinctRemoteIPs, TotalConnections, FirstSeen, LastSeen\r\n| sort by SuspicionScore desc, Rarity desc, DistinctDevices asc\r\n",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "SuspicionScore",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "red"
+              }
+            },
+            {
+              "columnMatch": "Rarity",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "green"
+              }
+            }
+          ]
+        }
+      },
+      "name": "q-triage"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 4. Incident-match fidelity\nWhich fingerprints are tied to your incidents and how tightly. **MatchTier** = flow-exact > host+time > host-any > shared-IP; **MatchFidelity** decays by time-gap and is weighted by rarity. **DrivingIncident** is the incident it matched."
+      },
+      "name": "h4"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// ============================================================================\r\n// 03 - JA4 / JA4S signature stack, INCIDENT-MATCH FIDELITY SCORED\r\n//      Platform: Microsoft Sentinel (Log Analytics)\r\n// ----------------------------------------------------------------------------\r\n// Sentinel analog of 01, scored against true INCIDENTS:\r\n//   SecurityIncident.AlertIds -> SecurityAlert (time + Entities) -> device/IP/account\r\n// MatchFidelity (0-100) = 100 * Specificity * TemporalDecay * Rarity * SeverityWeight\r\n//   Specificity  : flow-exact(1.0) > host+time(0.85) > host-any(0.6) > shared-IP(0.35)\r\n//   TemporalDecay: MISP polynomial max(floor, 1-(dt/tau)^k), dt=|conn - alert time|\r\n//   Rarity       : inverse host-prevalence (IDF) log(N/n)/log(N)\r\n// Bands: 75-100 High | 40-74 Medium | 20-39 Low | 1-19 Informational | 0 None\r\n// REQUIRES DeviceNetworkEvents streamed to the workspace.\r\n// ============================================================================\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};   // combined rarity gate (few hosts AND few connections)\r\nlet tau    = 2h;\r\nlet kdecay = 2.0;\r\nlet wFlow  = 15m;\r\nlet wHost  = 2h;\r\nlet ja4conn =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback)\r\n    | where ActionType == \"SslConnectionInspected\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)\r\n    | where isnotempty(ja4_) or isnotempty(ja4s_)\r\n    | project cTime = TimeGenerated, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_;\r\n// alert -> incident map\r\nlet incMap =\r\n    SecurityIncident\r\n    | where TimeGenerated > ago(lookback)\r\n    | summarize arg_max(TimeGenerated, Title, Severity, AlertIds) by IncidentNumber\r\n    | mv-expand SystemAlertId = todynamic(AlertIds) to typeof(string)\r\n    | project IncidentNumber, IncidentTitle = Title, IncidentSeverity = Severity, SystemAlertId;\r\nlet alertMeta = SecurityAlert | where TimeGenerated > ago(lookback) | project SystemAlertId, ATime = TimeGenerated, Entities;\r\nlet aDev = alertMeta | mv-expand e = todynamic(Entities) | extend mdatp = tostring(e.MdatpDeviceId) | where isnotempty(mdatp) | project SystemAlertId, ATime, aDev = mdatp;\r\nlet aIp  = alertMeta | mv-expand e = todynamic(Entities) | extend addr  = tostring(e.Address)       | where isnotempty(addr)  | project SystemAlertId, ATime, aIp  = addr;\r\nlet aUser =\r\n    alertMeta | mv-expand e = todynamic(Entities) | where tostring(e.Type) == \"account\"\r\n    | extend upn = coalesce(tostring(e.UserPrincipalName), iff(isnotempty(tostring(e.Name)) and isnotempty(tostring(e.UPNSuffix)), strcat(tostring(e.Name), \"@\", tostring(e.UPNSuffix)), tostring(e.Name)))\r\n    | where isnotempty(upn) | distinct SystemAlertId, upn;\r\n// device-linked matches (flow-exact if same alert also cites the conn's dest IP within wFlow)\r\nlet mDev =\r\n    ja4conn\r\n    | join kind=inner aDev on $left.DeviceId == $right.aDev\r\n    | extend dt = abs(cTime - ATime)\r\n    | join kind=leftouter (aIp | project SystemAlertId, aIp) on $left.SystemAlertId == $right.SystemAlertId, $left.RemoteIP == $right.aIp\r\n    | extend Stier = case(isnotempty(aIp) and dt <= wFlow, 1.0, dt <= wHost, 0.85, 0.60)\r\n    | project ja4_, ja4s_, SystemAlertId, dt, Stier;\r\nlet mIp =\r\n    ja4conn\r\n    | join kind=inner aIp on $left.RemoteIP == $right.aIp\r\n    | extend dt = abs(cTime - ATime)\r\n    | extend Stier = 0.35\r\n    | project ja4_, ja4s_, SystemAlertId, dt, Stier;\r\nlet matchesAll =\r\n    union mDev, mIp\r\n    | join kind=inner incMap on SystemAlertId\r\n    | extend D = max_of(0.02, 1.0 - pow(dt / tau, kdecay))\r\n    | extend rowScore = Stier * D * case(IncidentSeverity == \"High\", 1.0, IncidentSeverity == \"Medium\", 0.7, IncidentSeverity == \"Low\", 0.45, 0.2);\r\nlet bestPerPair = matchesAll | summarize arg_max(rowScore, IncidentNumber, IncidentTitle, IncidentSeverity, Stier, dt) by ja4_, ja4s_;\r\nlet identityPerPair =\r\n    matchesAll | distinct ja4_, ja4s_, SystemAlertId\r\n    | join kind=inner aUser on SystemAlertId\r\n    | summarize LinkedIdentities = make_set(upn, 6) by ja4_, ja4s_;\r\nlet breadthPerPair =\r\n    matchesAll | summarize LinkedIncidents = dcount(IncidentNumber), IncidentNumbers = make_set(IncidentNumber, 12) by ja4_, ja4s_;\r\nlet totalDevices = toscalar(ja4conn | summarize dcount(DeviceId));\r\nlet totalConns   = toscalar(ja4conn | count);\r\nlet rarity =\r\n    ja4conn | summarize Devs = dcount(DeviceId), Conns = count() by ja4_, ja4s_\r\n    | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))\r\n    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))\r\n    | extend R = min_of(Rhost, Rconn);\r\nja4conn\r\n| summarize TotalConnections = count(), DistinctDevices = dcount(DeviceId), DistinctRemoteIPs = dcount(RemoteIP),\r\n            SampleSNIs = make_set(sni, 6), FirstSeen = min(cTime), LastSeen = max(cTime)\r\n        by ja4_, ja4s_\r\n| join kind=leftouter rarity         on ja4_, ja4s_\r\n| where R >= minRarity\r\n| join kind=leftouter bestPerPair    on ja4_, ja4s_\r\n| join kind=leftouter breadthPerPair on ja4_, ja4s_\r\n| join kind=leftouter identityPerPair on ja4_, ja4s_\r\n| extend R = coalesce(R, 1.0), BestScore = coalesce(rowScore, 0.0), LinkedIncidents = coalesce(LinkedIncidents, 0)\r\n| extend MatchFidelity = toint(round(100.0 * BestScore * R))\r\n| extend FidelityBand = case(MatchFidelity >= 75, \"High\", MatchFidelity >= 40, \"Medium\", MatchFidelity >= 20, \"Low\", MatchFidelity > 0, \"Informational\", \"None\")\r\n| extend MatchTier = case(Stier == 1.0, \"flow-exact\", Stier == 0.85, \"host+time\", Stier == 0.6, \"host-any\", Stier == 0.35, \"shared-ip\", \"none\")\r\n| extend ClosestMatch = dt\r\n| project ja4_, ja4s_, MatchFidelity, FidelityBand, MatchTier, DrivingIncident = IncidentNumber, DrivingIncidentTitle = IncidentTitle,\r\n          DrivingSeverity = IncidentSeverity, ClosestMatch, LinkedIncidents, IncidentNumbers, LinkedIdentities, Rarity = round(R, 2),\r\n          TotalConnections, DistinctDevices, DistinctRemoteIPs, SampleSNIs, FirstSeen, LastSeen\r\n| sort by MatchFidelity desc, DistinctDevices asc, TotalConnections asc\r\n",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "MatchFidelity",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "red"
+              }
+            },
+            {
+              "columnMatch": "Rarity",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "green"
+              }
+            }
+          ]
+        }
+      },
+      "name": "q-fidelity"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 5. Beaconing call-homes\nRegular, low-jitter TLS to one destination = classic C2 shape. A **rare** JA4 to a **no-SNI / raw-IP** destination with low **JitterCV** is the top lead. Benign telemetry (Microsoft, AV, browsers) also beacons - triage by **Dest**."
+      },
+      "name": "h5"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// ============================================================================\r\n// 06 - JA4 BEACONING DETECTOR  (E5 / Defender XDR-native)\r\n// ----------------------------------------------------------------------------\r\n// Finds regular-interval (low-jitter) TLS call-homes per (device, JA4, dest) -\r\n// the classic C2 beacon shape. Keyed on destination = SNI (falls back to RemoteIP\r\n// for no-SNI / IP-literal C2), which is robust to cloud IP rotation.\r\n// BeaconScore = 100 * (1 - coefficient_of_variation); a perfectly periodic beacon\r\n// scores ~100. A RARE JA4 beaconing to a NON-corporate dest is the top lead.\r\n// NOTE: benign telemetry (MS Delivery Optimization, AV, browsers) also beacons -\r\n// triage by Dest/Rarity. Tunables: minConns, interval band, score floor.\r\n// ============================================================================\r\nlet lookback = {Lookback};\r\nlet minConns = 8;\r\nlet minIntervalSec = 30;\r\nlet maxIntervalSec = 172800;   // up to 2 days (covers daily call-homes)\r\nlet minBeaconScore = 50;\r\nlet minRarity = {MinRarity};           // combined rarity: few hosts AND few connections\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)\r\n    | where isnotempty(ja4_)\r\n    | extend Dest = iff(isnotempty(sni), sni, RemoteIP)\r\n    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, ja4_, Dest;\r\nlet totalDevices = toscalar(ssl | summarize dcount(DeviceId));\r\nlet totalConns   = toscalar(ssl | count);\r\nlet rarity = ssl | summarize Devs = dcount(DeviceId), Conns = count() by ja4_\r\n    | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))\r\n    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))\r\n    | extend Rarity = min_of(Rhost, Rconn);\r\nssl\r\n| sort by DeviceId asc, ja4_ asc, Dest asc, TimeGenerated asc\r\n| serialize\r\n| extend grp = strcat(DeviceId, \"|\", ja4_, \"|\", Dest)\r\n| extend delta = iff(prev(grp) == grp, datetime_diff('second', TimeGenerated, prev(TimeGenerated)), long(null))\r\n| where isnotnull(delta) and delta > 0\r\n| summarize Intervals = count(), MeanSec = avg(delta), StdevSec = stdev(delta),\r\n            SampleRemoteIP = take_any(RemoteIP), DeviceName = take_any(DeviceName),\r\n            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\r\n        by DeviceId, ja4_, Dest\r\n| extend Connections = Intervals + 1\r\n| where Connections >= minConns and MeanSec between (minIntervalSec .. maxIntervalSec)\r\n| extend CV = iff(MeanSec == 0, 1.0, StdevSec / MeanSec)\r\n| extend BeaconScore = toint(round(100.0 * (1.0 - min_of(1.0, CV))))\r\n| where BeaconScore >= minBeaconScore\r\n| join kind=leftouter rarity on ja4_\r\n| where Rarity >= minRarity\r\n| project DeviceName, ja4_, Dest, SampleRemoteIP, BeaconScore, Connections,\r\n          MeanIntervalMin = round(MeanSec / 60.0, 1), JitterCV = round(CV, 2),\r\n          Rarity = round(Rarity, 2), SpanHours = round(datetime_diff('minute', LastSeen, FirstSeen) / 60.0, 1),\r\n          FirstSeen, LastSeen\r\n| sort by BeaconScore desc, Rarity desc, Connections desc\r\n",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "BeaconScore",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "red"
+              }
+            },
+            {
+              "columnMatch": "Rarity",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "green"
+              }
+            }
+          ]
+        }
+      },
+      "name": "q-beacon"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## 6. JA4 rarity landscape\nFingerprints by **combined rarity** (0 = ubiquitous, 1 = singleton on both hosts and connections). The **right-hand bars are the rare tail** - your hunting ground; the **Min rarity** slider focuses every other section there."
+      },
+      "name": "h6"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "// Workbook: JA4 rarity landscape - pairs by combined (host AND connection) rarity\r\nlet lookback = {Lookback};\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s)\r\n    | where isnotempty(ja4_) or isnotempty(ja4s_);\r\nlet totalDevices = toscalar(ssl | summarize dcount(DeviceId));\r\nlet totalConns   = toscalar(ssl | count);\r\nssl\r\n| summarize Conns = count(), Devs = dcount(DeviceId) by ja4_, ja4s_\r\n| extend R = min_of(iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices)))),\r\n                    iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns)))))\r\n| summarize Pairs = count() by RarityBucket = bin(R, 0.1)\r\n| sort by RarityBucket asc\r\n",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "RarityBucket",
+          "yAxis": [
+            "Pairs"
+          ]
+        }
+      },
+      "name": "q-landscape"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Methodology & sources\nMISP decaying models (temporal decay) | Pyramid of Pain (JA4 ranks above IP) | JA4 spec (structure decode) | detection-engineering proximity scoring | Recorded Future / STIX confidence bands. All signals are Microsoft E5 / Defender-native - no external threat-intel feeds."
+      },
+      "name": "footer"
+    }
+  ],
+  "styleSettings": {},
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

@@ -1,0 +1,66 @@
+// ============================================================================
+// 05 - RARE JA4 MALICE TRIAGE  (E5 / Defender XDR-native, no external feeds)
+//      HIGH-FIDELITY: rarity-gated + corroboration-required + public-dest only
+// ----------------------------------------------------------------------------
+// Flags a JA4 x JA4S pair only if it is RARE (R >= minRarity) AND has either one
+// STRONG signal or 2+ WEAK signals - which cuts benign noise (common fingerprints,
+// LAN appliances/printers, ubiquitous CAs like Let's Encrypt).
+//   Strong : LOLBIN process | legacy TLS (<1.2) | self-signed cert to PUBLIC dest
+//   Weak   : no-SNI (public) | no-ALPN (public) | user/temp-path proc | SNI=IP (public)
+// Cert/structural signals count only for PUBLIC destinations, so internal
+// printers / appliances / localhost are suppressed.
+// Sources: JA4 spec (structure decode); LOLBAS; Pyramid of Pain.
+// ============================================================================
+let lookback = 30d;
+let minRarity = 0.7;   // combined rarity: few hosts AND few connections (raise toward 1.0 to tighten)
+let ssl =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),
+             issuer = tostring(AF.issuer), subject = tostring(AF.subject)
+    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | extend selfSignedPub = (isnotempty(issuer) and issuer == subject and isPublic),
+             sniIsIpPub = ((sni matches regex @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$") and isPublic)
+    | project Timestamp, DeviceId, RemoteIP, RemotePort, ja4_, ja4s_, sni, issuer, isPublic, selfSignedPub, sniIsIpPub;
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId));
+let totalConns   = toscalar(ssl | count);
+// recover the process behind the JA4 via ConnectionSuccess (same flow, +-180s)
+let procs =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+    | extend Proc = tolower(InitiatingProcessFileName), ProcPath = tolower(InitiatingProcessFolderPath)
+    | extend isLolbin = Proc in ("rundll32.exe","regsvr32.exe","mshta.exe","powershell.exe","pwsh.exe","wscript.exe","cscript.exe","certutil.exe","bitsadmin.exe","msbuild.exe","installutil.exe","regasm.exe","regsvcs.exe","cmstp.exe","wmic.exe","hh.exe")
+    | extend isUserPath = (ProcPath startswith "c:\\users\\" or ProcPath has "appdata\\local\\temp" or ProcPath has "\\downloads\\" or ProcPath has "appdata\\roaming")
+    | project DeviceId, RemoteIP, RemotePort, pTime = Timestamp, Proc, isLolbin, isUserPath;
+let procPair =
+    ssl
+    | join kind=inner procs on DeviceId, RemoteIP, RemotePort
+    | where abs(datetime_diff('second', Timestamp, pTime)) <= 180
+    | summarize AnyLolbin = max(isLolbin), AnyUserPath = max(isUserPath), Procs = make_set(Proc, 8) by ja4_, ja4s_;
+ssl
+| summarize TotalConnections = count(), DistinctDevices = dcount(DeviceId), DistinctRemoteIPs = dcount(RemoteIP),
+            AnySelfSignedPub = max(selfSignedPub), AnySniIpPub = max(sniIsIpPub), AnyPublic = max(isPublic),
+            SampleSNIs = make_set(sni, 5), Issuers = make_set(issuer, 3), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+        by ja4_, ja4s_
+| extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(DistinctDevices)) / log(todouble(totalDevices))))
+| extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(TotalConnections)) / log(todouble(totalConns))))
+| extend R = min_of(Rhost, Rconn)                       // combined: rare on BOTH axes
+| where R >= minRarity                                  // RARITY GATE
+| join kind=leftouter procPair on ja4_, ja4s_
+| extend AnyLolbin = coalesce(AnyLolbin, false), AnyUserPath = coalesce(AnyUserPath, false)
+| extend legacy = (substring(ja4_, 1, 2) in ("10", "11", "s3", "s2")),
+         noSNI = (substring(ja4_, 3, 1) == "i" and AnyPublic), noALPN = (substring(ja4_, 8, 2) == "00" and AnyPublic)
+| extend StrongCount = iff(AnyLolbin, 1, 0) + iff(legacy, 1, 0) + iff(AnySelfSignedPub, 1, 0),
+         WeakCount   = iff(noSNI, 1, 0) + iff(noALPN, 1, 0) + iff(AnyUserPath, 1, 0) + iff(AnySniIpPub, 1, 0)
+| where StrongCount >= 1 or WeakCount >= 2              // CORROBORATION
+| extend SuspicionScore = min_of(100, iff(AnyLolbin, 35, 0) + iff(legacy, 25, 0) + iff(AnySelfSignedPub, 30, 0)
+      + iff(AnySniIpPub, 15, 0) + iff(noSNI, 12, 0) + iff(AnyUserPath, 12, 0) + iff(noALPN, 8, 0))
+| extend Reasons = set_difference(pack_array(
+        iff(AnyLolbin, "LOLBIN process", ""), iff(legacy, "legacy TLS", ""),
+        iff(AnySelfSignedPub, "self-signed cert (public dest)", ""), iff(AnySniIpPub, "SNI=IP literal (public)", ""),
+        iff(AnyUserPath, "user/temp-path process", ""), iff(noSNI, "no-SNI (public)", ""), iff(noALPN, "no-ALPN (public)", "")), dynamic([""]))
+| extend Verdict = case(SuspicionScore >= 50, "High", SuspicionScore >= 30, "Medium", "Low")
+| project ja4_, ja4s_, Verdict, SuspicionScore, Reasons, Procs, SampleSNIs, Issuers,
+          Rarity = round(R, 2), DistinctDevices, DistinctRemoteIPs, TotalConnections, FirstSeen, LastSeen
+| sort by SuspicionScore desc, Rarity desc, DistinctDevices asc

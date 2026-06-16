@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceResourceId": {
+      "value": "/subscriptions/<SUBSCRIPTION-ID>/resourceGroups/<WORKSPACE-RG>/providers/Microsoft.OperationalInsights/workspaces/<WORKSPACE-NAME>"
+    },
+    "workbookDisplayName": {
+      "value": "JA4/JA4S Threat Hunting"
+    },
+    "location": {
+      "value": "usgovvirginia"
+    }
+  }
+}
