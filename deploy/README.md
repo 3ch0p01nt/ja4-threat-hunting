@@ -78,14 +78,18 @@ re-running the deployment **updates the same workbook in place**. To ship a new 
 queries, replace `workbook-content.json` and redeploy.
 
 ## Performance
-The KQL `materialize()`s its base `DeviceNetworkEvents` / `SecurityAlert` scans, so each heavy table is
-read **once per run** instead of 6-7x — the dominant cost on large workspaces.
+Each query uses a `has "ja4"` term-index prefilter before `todynamic()`, a single-pass rarity
+computation, and an **early rarity gate** so the expensive joins (process attribution, incident
+correlation, beaconing) run only over the rare tail. Beaconing uses `make_list` + `mv-apply` instead of
+a global `sort | serialize | prev()`, restoring cluster parallelism. The workbook loads **one section at
+a time** (conditionally-visible groups don't execute their queries), so it never scans
+`DeviceNetworkEvents` for every panel at once.
 
-For very high-volume IL5 workspaces, the next step is **staging**: schedule a **Log Analytics Summary Rule**
-(`Microsoft.OperationalInsights/workspaces/summaryLogs`) to roll the raw scan + joins into small `*_CL`
-tables on a cadence (hourly/daily), then repoint the workbook at those tables so it reads pre-aggregated
-data. (Verify Summary Rules availability in your IL5 enclave; the universal fallback is an Automation
-runbook / Logic App that writes the rollups via the **Logs Ingestion API + DCR**.)
+The large per-connection base is deliberately **not** `materialize()`d: caching a 30-day SSL scan
+exceeds Kusto's 5 GB global cache at production volume (`E_RUNAWAY_QUERY 80DA0001`). Only small
+per-pair and entity results are materialized. If a section still times out, lower the **Lookback** to
+7-14 days; the queries are cheap enough that staging into custom `*_CL` tables is unnecessary (and
+Summary Rules are not available in Azure Government anyway).
 
 ## Notes for Azure Government / IL5
 - The templates contain **no cloud-specific endpoints** — they deploy through whatever ARM

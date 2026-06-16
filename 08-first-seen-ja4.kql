@@ -1,0 +1,35 @@
+// ============================================================================
+// 08 - FIRST-SEEN JA4 IN ENVIRONMENT  (E5 / Defender XDR-native, no external feeds)
+//      Platform: Microsoft Defender XDR > Advanced Hunting
+// ----------------------------------------------------------------------------
+// A JA4 that is ABSENT from the whole baseline and then appears in the last
+// `newWindow` is a strong new-implant signal - especially when it spreads to
+// multiple hosts within hours (lateral movement). In a largely static estate a
+// brand-new TLS fingerprint warrants a look (FoxIO guidance). New == inherently
+// rare, so no rarity gate; we require >=3 connections to drop one-offs.
+// Sources: FoxIO JA4+ ("a sudden new JA4 in a static estate"); small-population analytics.
+// ============================================================================
+let lookback = 30d;
+let newWindow = 2d;            // "recent" = last 2 days; everything before is the baseline
+let base =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_)
+    | project Timestamp, DeviceId, RemoteIP, ja4_, sni;
+let historic = materialize(base | where Timestamp < ago(newWindow) | distinct ja4_);
+base
+| where Timestamp >= ago(newWindow)
+| summarize NewConns = count(), NewDevices = dcount(DeviceId, 4), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 5),
+            FirstSeen = min(Timestamp), LastSeen = max(Timestamp) by ja4_
+| join kind=leftanti historic on ja4_      // present now, NOT in the baseline = brand new
+| where NewConns >= 3
+| extend Spread = iff(NewDevices >= 2, "spreading (multi-host)", "single host")
+| extend cipherCnt = toint(substring(ja4_, 4, 2)), extCnt = toint(substring(ja4_, 6, 2))
+| extend Note = strcat(iff(substring(ja4_, 1, 2) in ("10","11","s3","s2"), "legacy-TLS ", ""),
+                       iff(substring(ja4_, 3, 1) == "i", "no-SNI ", ""), iff(extCnt == 0, "no-ext ", ""),
+                       iff(cipherCnt between (1 .. 3), "few-ciphers ", ""))
+| project ja4_, NewDevices, NewConns, Spread, Note, Dests, FirstSeen, LastSeen
+| sort by NewDevices desc, NewConns desc

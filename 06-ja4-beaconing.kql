@@ -18,34 +18,39 @@ let minRarity = 0.7;           // combined rarity: few hosts AND few connections
 let ssl =
     DeviceNetworkEvents
     | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
     | extend AF = todynamic(AdditionalFields)
     | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
     | where isnotempty(ja4_)
     | extend Dest = iff(isnotempty(sni), sni, RemoteIP)
     | project Timestamp, DeviceId, DeviceName, RemoteIP, ja4_, Dest;
-let totalDevices = toscalar(ssl | summarize dcount(DeviceId));
-let totalConns   = toscalar(ssl | count);
-let rarity = ssl | summarize Devs = dcount(DeviceId), Conns = count() by ja4_
+let perJa4 = materialize(ssl | summarize Devs = dcount(DeviceId, 4), Conns = count() by ja4_);
+let totalConns   = toscalar(perJa4 | summarize sum(Conns));        // derived, no extra scan
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));
+let rarity = materialize(
+    perJa4
     | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))
     | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
-    | extend Rarity = min_of(Rhost, Rconn);
+    | extend Rarity = min_of(Rhost, Rconn)
+    | where Rarity >= minRarity);                                  // EARLY rarity gate (per ja4_)
+// Only rare-JA4 connections reach the per-group inter-arrival pass. make_list + mv-apply replaces the
+// global sort|serialize|prev() (which forced single-node execution) - intervals computed per group.
 ssl
-| sort by DeviceId asc, ja4_ asc, Dest asc, Timestamp asc
-| serialize
-| extend grp = strcat(DeviceId, "|", ja4_, "|", Dest)
-| extend delta = iff(prev(grp) == grp, datetime_diff('second', Timestamp, prev(Timestamp)), long(null))
-| where isnotnull(delta) and delta > 0
-| summarize Intervals = count(), MeanSec = avg(delta), StdevSec = stdev(delta),
-            SampleRemoteIP = take_any(RemoteIP), DeviceName = take_any(DeviceName),
-            FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+| join kind=inner (rarity | project ja4_) on ja4_
+| summarize Timestamps = make_list(Timestamp), Connections = count(), SampleRemoteIP = take_any(RemoteIP),
+            DeviceName = take_any(DeviceName), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
         by DeviceId, ja4_, Dest
-| extend Connections = Intervals + 1
-| where Connections >= minConns and MeanSec between (minIntervalSec .. maxIntervalSec)
+| where Connections >= minConns
+| mv-apply T = array_sort_asc(Timestamps) to typeof(datetime) on (
+      extend delta = datetime_diff('second', T, prev(T))
+      | where isnotnull(delta) and delta > 0
+      | summarize Intervals = count(), MeanSec = avg(delta), StdevSec = stdev(delta)
+  )
+| where MeanSec between (minIntervalSec .. maxIntervalSec)
 | extend CV = iff(MeanSec == 0, 1.0, StdevSec / MeanSec)
 | extend BeaconScore = toint(round(100.0 * (1.0 - min_of(1.0, CV))))
 | where BeaconScore >= minBeaconScore
 | join kind=leftouter rarity on ja4_
-| where Rarity >= minRarity
 | project DeviceName, ja4_, Dest, SampleRemoteIP, BeaconScore, Connections,
           MeanIntervalMin = round(MeanSec / 60.0, 1), JitterCV = round(CV, 2),
           Rarity = round(Rarity, 2), SpanHours = round(datetime_diff('minute', LastSeen, FirstSeen) / 60.0, 1),

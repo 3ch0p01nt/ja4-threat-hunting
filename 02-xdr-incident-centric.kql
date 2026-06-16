@@ -18,40 +18,43 @@ let ja4conn =
     DeviceNetworkEvents
     | where Timestamp > ago(lookback)
     | where ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
     | extend AF = todynamic(AdditionalFields)
     | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
     | where isnotempty(ja4_) or isnotempty(ja4s_)
     | project cTime = Timestamp, DeviceId, RemoteIP, sni, ja4_, ja4s_;
+let agg = materialize(ja4conn | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_, ja4s_);
+let totalConns   = toscalar(agg | summarize sum(Conns));
+let totalDevices = toscalar(ja4conn | summarize dcount(DeviceId, 4));
+let rare = materialize(
+    agg
+    | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity);
+let rareConns = ja4conn | join kind=inner (rare | project ja4_, ja4s_) on ja4_, ja4s_ | project cTime, DeviceId, RemoteIP, sni, ja4_, ja4s_;
 let aeDev = AlertEvidence | where Timestamp > ago(lookback) and isnotempty(DeviceId)
             | project AlertId, aDeviceId = DeviceId, ATime = Timestamp, Title, Severity;
 let aeIp  = AlertEvidence | where Timestamp > ago(lookback) and isnotempty(RemoteIP)
             | project AlertId, aRemoteIP = RemoteIP, ATime = Timestamp, Title, Severity;
 let mDev =
-    ja4conn
+    rareConns
     | join kind=inner aeDev on $left.DeviceId == $right.aDeviceId
     | extend dt = abs(cTime - ATime)
     | join kind=leftouter (aeIp | project AlertId, aRemoteIP) on $left.AlertId == $right.AlertId, $left.RemoteIP == $right.aRemoteIP
     | extend Stier = case(isnotempty(aRemoteIP) and dt <= wFlow, 1.0, dt <= wHost, 0.85, 0.60)
     | project ja4_, ja4s_, sni, AlertId, Title, Severity, dt, Stier;
 let mIp =
-    ja4conn
+    rareConns
     | join kind=inner aeIp on $left.RemoteIP == $right.aRemoteIP
     | extend dt = abs(cTime - ATime)
     | extend Stier = 0.35
     | project ja4_, ja4s_, sni, AlertId, Title, Severity, dt, Stier;
-let totalDevices = toscalar(ja4conn | summarize dcount(DeviceId));
-let totalConns   = toscalar(ja4conn | count);
-let rarity =
-    ja4conn | summarize Devs = dcount(DeviceId), Conns = count() by ja4_, ja4s_
-    | extend Rhost = iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices))))
-    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
-    | extend R = min_of(Rhost, Rconn);
 union mDev, mIp
 | extend D = max_of(0.02, 1.0 - pow(dt / tau, kdecay))
 | extend rowScore = Stier * D * case(Severity == "High", 1.0, Severity == "Medium", 0.7, Severity == "Low", 0.45, 0.2)
 | summarize arg_max(rowScore, Stier, dt, sni) by AlertId, Title, Severity, ja4_, ja4s_
-| join kind=inner rarity on ja4_, ja4s_
-| where R >= minRarity
+| lookup kind=leftouter (rare | project ja4_, ja4s_, R) on ja4_, ja4s_
 | extend MatchFidelity = toint(round(100.0 * rowScore * R))
 | where MatchFidelity >= minFidelity
 | extend MatchTier = case(Stier == 1.0, "flow-exact", Stier == 0.85, "host+time", Stier == 0.6, "host-any", Stier == 0.35, "shared-ip", "none")

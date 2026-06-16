@@ -1,0 +1,27 @@
+// ============================================================================
+// 09 - CIPHER-CYCLING ACTOR TRACKING via JA4_ac  (E5 / Defender XDR-native)
+//      Platform: Microsoft Defender XDR > Advanced Hunting
+// ----------------------------------------------------------------------------
+// JA4_ac = a-section + c-section of the JA4, dropping the cipher hash (b). An actor
+// who rotates TLS ciphers (to defeat JA3/JA4 full-hash matching) produces many
+// distinct full JA4s but a STABLE JA4_ac. Many full-JA4 variants under one JA4_ac
+// is the GreyNoise-documented cipher-cycling signature.
+// Sources: FoxIO README (GreyNoise actor example); JA4 spec (a=chars 0-9, c=chars 24-35).
+// ============================================================================
+let lookback = 30d;
+let base =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and strlen(ja4_) >= 36
+    | extend ja4_ac = strcat(substring(ja4_, 0, 10), "_", substring(ja4_, 24, 12))
+    | project Timestamp, DeviceId, RemoteIP, ja4_, ja4_ac, sni;
+base
+| summarize DistinctJa4 = dcount(ja4_, 4), Variants = make_set(ja4_, 8), Conns = count(), Devices = dcount(DeviceId, 4),
+            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 5), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+        by ja4_ac
+| where DistinctJa4 >= 4                     // same a+c but 4+ cipher variants = cipher cycling
+| project ja4_ac, DistinctJa4, Devices, Conns, Dests, FirstSeen, LastSeen, Variants
+| sort by DistinctJa4 desc, Conns desc

@@ -27,13 +27,27 @@ set **`workspaceResourceId`** to your Log Analytics / Sentinel workspace, then *
 | `02` / `04` | Incident-centric per-pair fidelity. |
 | `05-rare-ja4-malice-triage.kql` | Rare-fingerprint malice triage (structure / process / cert signals). |
 | `06-ja4-beaconing.kql` | Low-jitter C2 beaconing detector. |
+| `08-first-seen-ja4.kql` | Brand-new JA4 in the estate (anti-join vs baseline) - new-implant signal. |
+| `09-cipher-cycling-ja4ac.kql` | JA4_ac actor tracking - one a+c with many cipher variants (evasion). |
+| `10-known-malware-pairs.kql` | **Opt-in** known-bad JA4+JA4S lookup (public FoxIO reference data). |
 | `deploy/` | ARM + Bicep + parameters + Gov-aware deploy script. |
 
-## Scoring (all data-driven, no embedded IOC lists)
-- **Rarity** = combined: rare only if on *few hosts AND few connections*. A **Min rarity** slider focuses every panel on the rare tail.
+## Scoring (core signals are data-driven; known-bad lookup is opt-in)
+- **Rarity** = combined: rare only if on *few hosts AND few connections*. A **Min rarity** selector focuses every panel on the rare tail.
 - **Incident-match fidelity** = specificity (flow-exact > host+time > host-any > shared-IP) × temporal decay × rarity × **incident severity**.
-- **Malice triage** = rarity-gated + corroboration-required (LOLBIN / legacy-TLS / self-signed-to-public / no-SNI / no-ALPN / user-path).
+- **Malice triage** = rarity-gated + corroboration-required. Strong: LOLBIN / legacy-TLS / self-signed-to-public / no-TLS-extensions. Weak (need 2): no-SNI / no-ALPN / user-path / SNI=IP / abnormal cipher count. A self-CA cert (issuer has no `O=`) approximates a JA4X C2 cert; an **age discount** demotes aged, widespread fingerprints. Verdict tops out at **Critical**.
 - **Beaconing** = low coefficient-of-variation on inter-arrival times.
+- **First-seen / cipher-cycling** = brand-new JA4 in the estate; one JA4_ac with many cipher variants.
+- **Known-bad (opt-in)** = exact JA4+JA4S match against FoxIO's public ja4plus-mapping (embedded static table, not a premium feed). Toggle **Known-bad lookup = On** in the workbook to enable.
+
+## Performance
+Every query uses a `has "ja4"` term-index prefilter before `todynamic()`, a single-pass rarity computation,
+and an **early rarity gate** so the expensive joins (process attribution, incident correlation, beaconing)
+run only over the rare tail. Beaconing uses `make_list` + `mv-apply` (no global `serialize`). The workbook
+loads **one section at a time** (conditionally-visible groups don't run their queries), so the whole
+dashboard never scans `DeviceNetworkEvents` for every panel at once. The large per-connection base is
+deliberately **not** `materialize()`d (that exceeds Kusto's 5 GB cache at production scale); only small
+per-pair / entity results are materialized.
 
 ## Data requirements
 The target workspace needs Defender XDR data: `DeviceNetworkEvents` (`SslConnectionInspected` with JA4 in
@@ -41,5 +55,6 @@ The target workspace needs Defender XDR data: `DeviceNetworkEvents` (`SslConnect
 It deploys regardless — sections without data simply return no rows.
 
 ## Sources / methodology
-MISP decaying models (temporal decay) · Pyramid of Pain (JA4 ranks above IP) · JA4 spec (structure decode) ·
-detection-engineering proximity scoring · Recorded Future / STIX confidence bands.
+MISP decaying models (temporal decay) · Pyramid of Pain (JA4 ranks above IP) · JA4 / JA4+ spec (structure
+decode, JA4_ac) · FoxIO ja4plus-mapping (opt-in known-bad only) · detection-engineering proximity scoring ·
+Recorded Future / STIX confidence bands.
