@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
+  "handler": "Microsoft.Azure.CreateUIDef",
+  "version": "0.1.2-preview",
+  "parameters": {
+    "config": {
+      "isWizard": false,
+      "basics": {
+        "description": "Deploys the **JA4/JA4S Threat Hunting** workbook to a Microsoft Sentinel / Log Analytics workspace. Pick the workspace it should run against."
+      }
+    },
+    "basics": [
+      {
+        "name": "workbookDisplayName",
+        "type": "Microsoft.Common.TextBox",
+        "label": "Workbook name",
+        "defaultValue": "JA4/JA4S Threat Hunting",
+        "toolTip": "Name shown under Microsoft Sentinel > Workbooks.",
+        "constraints": { "required": true }
+      },
+      {
+        "name": "workspaceSelector",
+        "type": "Microsoft.Solutions.ResourceSelector",
+        "label": "Log Analytics / Sentinel workspace",
+        "resourceType": "Microsoft.OperationalInsights/workspaces",
+        "toolTip": "The workspace the workbook queries. Must contain Defender XDR DeviceNetworkEvents / SecurityIncident data.",
+        "constraints": { "required": true }
+      }
+    ],
+    "steps": [],
+    "outputs": {
+      "workbookDisplayName": "[basics('workbookDisplayName')]",
+      "workspaceResourceId": "[basics('workspaceSelector').id]",
+      "location": "[location()]"
+    }
+  }
+}

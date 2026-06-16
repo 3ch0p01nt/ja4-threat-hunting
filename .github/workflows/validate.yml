@@ -1,0 +1,32 @@
+name: validate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep
+        run: az bicep install
+
+      - name: Build Bicep (compiles main.bicep + embedded workbook-content.json)
+        run: az bicep build --file deploy/main.bicep --outfile "${RUNNER_TEMP}/main.json"
+
+      - name: Validate JSON artifacts are well-formed
+        run: |
+          for f in \
+            deploy/azuredeploy.json \
+            deploy/azuredeploy.parameters.json \
+            deploy/createUiDefinition.json \
+            deploy/workbook-content.json \
+            07-ja4-threat-hunting-workbook.json
+          do
+            python3 -c "import json,sys; json.load(open(sys.argv[1])); print('valid:', sys.argv[1])" "$f"
+          done

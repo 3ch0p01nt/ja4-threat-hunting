@@ -1,0 +1,28 @@
+name: release
+
+# Tag a version (e.g. `git tag v1.0.0 && git push --tags`) to publish a GitHub
+# Release with the deployable artifacts attached.
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish release with deploy artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            deploy/azuredeploy.json
+            deploy/main.bicep
+            deploy/workbook-content.json
+            deploy/azuredeploy.parameters.json
+            deploy/createUiDefinition.json
+            07-ja4-threat-hunting-workbook.json
