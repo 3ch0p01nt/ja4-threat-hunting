@@ -1,0 +1,50 @@
+// ============================================================================
+// 12 - C2 TLS-SHAPE (Cobalt Strike / Meterpreter)  (E5 / Defender XDR-native)
+//      Platform: Microsoft Defender XDR > Advanced Hunting
+// ----------------------------------------------------------------------------
+// Malleable-C2 cannot change the WinINET/WinHTTP ClientHello. The CS/Meterpreter
+// beacon shape is: TLS 1.2 (a-section "12") + NO ALPN ("00") + a LOLBIN/loader
+// process to a PUBLIC, non-Microsoft destination. Two exact tells confirm CS:
+//   client c-section 16bbda4055b2  |  server JA4S t120300_c030_52d195ce1d92
+// Exact tells = CRITICAL (any process). The shape alone requires a suspicious
+// process or user/temp path AND a non-MS destination to stay high-fidelity.
+// Sources: FoxIO ja4plus-mapping (CS v4.9.1 entries); Sekoia CS hunting.
+// ============================================================================
+let lookback = 30d;
+let csJa4s = "t120300_c030_52d195ce1d92";     // Cobalt Strike default server response
+let csCsec = "16bbda4055b2";                   // CS v4.9.1 client c-section (WinINET/WinHTTP)
+let suspProcs = dynamic(["rundll32.exe","regsvr32.exe","mshta.exe","wscript.exe","cscript.exe","cmd.exe","msiexec.exe","powershell.exe","pwsh.exe","msbuild.exe","hh.exe","installutil.exe","regsvcs.exe","regasm.exe"]);
+let msSni = dynamic([".microsoft.com",".windows.com",".windowsupdate.com",".office.com",".office365.com",".sharepoint.com",".onedrive.com",".microsoftonline.com",".azure.com",".azureedge.net",".msedge.net",".msftconnecttest.com",".windows.net"]);
+let ssl =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where strlen(ja4_) >= 36
+    | extend tlsVer = substring(ja4_, 1, 2), alpn = substring(ja4_, 8, 2), csec = substring(ja4_, 24, 12)
+    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | where isPublic and ((tlsVer == "12" and alpn == "00") or ja4s_ == csJa4s or csec == csCsec)
+    | summarize Conns = count(), DeviceName = take_any(DeviceName), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+            by DeviceId, RemoteIP, RemotePort, ja4_, ja4s_, tlsVer, alpn, csec, sni;
+let procs =
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+    | summarize Proc = take_any(tolower(InitiatingProcessFileName)), ProcFolder = take_any(InitiatingProcessFolderPath)
+            by DeviceId, RemoteIP, RemotePort;
+ssl
+| join hint.shufflekey=DeviceId kind=inner procs on DeviceId, RemoteIP, RemotePort
+| extend exactCs   = (ja4s_ == csJa4s or csec == csCsec)
+| extend shape     = (tlsVer == "12" and alpn == "00")
+| extend suspProc  = (Proc in~ (suspProcs))
+| extend isUserPath = (ProcFolder has "appdata" or ProcFolder hasprefix "c:\\users\\" or ProcFolder has "\\temp\\")
+| extend isMsDest  = (isnotempty(sni) and sni has_any (msSni))
+| where exactCs or (shape and suspProc and not(isMsDest))
+| extend Why = strcat(iff(csec == csCsec, "CS client c-section; ", ""), iff(ja4s_ == csJa4s, "CS server JA4S; ", ""),
+                      iff(shape, "TLS1.2+no-ALPN; ", ""), iff(suspProc, strcat("proc ", Proc, "; "), ""), iff(isUserPath, "user/temp path; ", ""))
+| summarize Conns = sum(Conns), Devices = dcount(DeviceId, 4), Procs = make_set(Proc, 5), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+            AnyExactCs = max(exactCs), AnyUserPath = max(isUserPath), Why = take_any(Why), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen)
+        by ja4_, ja4s_
+| extend Verdict = iff(AnyExactCs, "CRITICAL - Cobalt Strike fingerprint", "HIGH - C2 TLS shape + suspicious process")
+| project Verdict, ja4_, ja4s_, Why, Procs, Devices, Conns, AnyUserPath, Dests, FirstSeen, LastSeen
+| sort by Verdict asc, Devices asc, Conns asc

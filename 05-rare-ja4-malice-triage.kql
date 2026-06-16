@@ -39,6 +39,7 @@ let agg = materialize(
     ssl
     | summarize TotalConnections = count(), DistinctDevices = dcount(DeviceId, 4), DistinctRemoteIPs = dcount(RemoteIP, 4),
                 AnySelfSignedPub = max(selfSignedPub), AnySniIpPub = max(sniIsIpPub), AnyPublic = max(isPublic), AnyEmptyOrgPub = max(emptyOrgPub),
+                AnyMsIssuer = max(issuer has "Microsoft" or issuer has "DigiCert Cloud Services CA"),
                 SampleSNIs = make_set(sni, 5), Issuers = make_set(issuer, 3), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
             by ja4_, ja4s_);
 let totalConns   = toscalar(agg | summarize sum(TotalConnections));   // derived from agg, no extra scan
@@ -75,16 +76,23 @@ rare
 | where StrongCount >= 1 or WeakCount >= 2              // CORROBORATION
 | extend DaysActive = datetime_diff('day', LastSeen, FirstSeen)
 | extend AgePenalty = iff(DaysActive > 14 and DistinctDevices >= 3, -15, 0)   // benign-rollout discount
+| extend bsec = substring(ja4_, 10, 12), ProcsSafe = coalesce(Procs, dynamic([]))
+| extend knownGoodLib = (   // known TLS library used by its EXPECTED process -> down-weight (FP cut)
+       (bsec in ("8daaf6152771", "55b375c5d22e") and array_length(set_intersect(ProcsSafe, dynamic(["chrome.exe","msedge.exe","brave.exe","opera.exe","vivaldi.exe","arc.exe","msedgewebview2.exe","teams.exe","ms-teams.exe","slack.exe","code.exe","discord.exe"]))) > 0)
+    or (bsec == "5b57614c22b0" and array_length(set_intersect(ProcsSafe, dynamic(["firefox.exe","thunderbird.exe","tor.exe","librewolf.exe"]))) > 0)
+    or (bsec == "85036bcba153" and array_length(set_intersect(ProcsSafe, dynamic(["python.exe","python3.exe","pythonw.exe"]))) > 0))
+| extend BenignPenalty = iff(knownGoodLib, -30, 0) + iff(AnyMsIssuer, -20, 0)   // Microsoft-issued cert / known-good lib+proc
 | extend SuspicionScore = max_of(0, min_of(100,
         iff(AnyLolbin, 35, 0) + iff(legacy, 25, 0) + iff(AnySelfSignedPub, 30, 0) + iff(noExt, 20, 0) + iff(AnyEmptyOrgPub, 10, 0)
       + iff(AnySniIpPub, 15, 0) + iff(fewCiphers, 12, 0) + iff(noSNI, 12, 0) + iff(AnyUserPath, 12, 0) + iff(manyCiphers, 10, 0) + iff(noALPN, 8, 0))
-      + AgePenalty)
+      + AgePenalty + BenignPenalty)
 | extend Reasons = set_difference(pack_array(
         iff(AnyLolbin, "LOLBIN process", ""), iff(legacy, "legacy TLS", ""), iff(AnySelfSignedPub, "self-signed cert (public dest)", ""),
         iff(noExt, "no TLS extensions (public)", ""), iff(AnyEmptyOrgPub, "cert issuer has no Org (self-CA)", ""),
         iff(AnySniIpPub, "SNI=IP literal (public)", ""), iff(fewCiphers, "very few ciphers (public)", ""), iff(noSNI, "no-SNI (public)", ""),
         iff(AnyUserPath, "user/temp-path process", ""), iff(manyCiphers, "unusually many ciphers (public)", ""), iff(noALPN, "no-ALPN (public)", ""),
-        iff(AgePenalty < 0, "(aged/widespread: discounted)", "")), dynamic([""]))
+        iff(AgePenalty < 0, "(aged/widespread: discounted)", ""), iff(knownGoodLib, "(known-good library+process: discounted)", ""),
+        iff(AnyMsIssuer, "(Microsoft-issued cert: discounted)", "")), dynamic([""]))
 | extend Verdict = case(SuspicionScore >= 80, "Critical", SuspicionScore >= 50, "High", SuspicionScore >= 30, "Medium", "Low")
 | project ja4_, ja4s_, Verdict, SuspicionScore, Reasons, Procs, SampleSNIs, Issuers,
           Rarity = round(R, 2), DistinctDevices, DistinctRemoteIPs, TotalConnections, DaysActive, FirstSeen, LastSeen

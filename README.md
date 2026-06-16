@@ -29,7 +29,9 @@ set **`workspaceResourceId`** to your Log Analytics / Sentinel workspace, then *
 | `06-ja4-beaconing.kql` | Low-jitter C2 beaconing detector. |
 | `08-first-seen-ja4.kql` | Brand-new JA4 in the estate (anti-join vs baseline) - new-implant signal. |
 | `09-cipher-cycling-ja4ac.kql` | JA4_ac actor tracking - one a+c with many cipher variants (evasion). |
-| `10-known-malware-pairs.kql` | **Opt-in** known-bad JA4+JA4S lookup (public FoxIO reference data). |
+| `10-known-malware-pairs.kql` | **Opt-in** known-bad JA4+JA4S lookup + JA4X-approx self-CA cert structure (public FoxIO data). |
+| `11-process-ja4-mismatch.kql` | Process vs JA4-library contradiction (b-section library ID) - uTLS parroting / injection / loaders. |
+| `12-c2-tls-shape.kql` | Cobalt Strike / Meterpreter shape: TLS1.2 + no-ALPN + LOLBIN to non-MS dest, or exact CS c-section / JA4S. |
 | `deploy/` | ARM + Bicep + parameters + Gov-aware deploy script. |
 
 ## Scoring (core signals are data-driven; known-bad lookup is opt-in)
@@ -38,7 +40,9 @@ set **`workspaceResourceId`** to your Log Analytics / Sentinel workspace, then *
 - **Malice triage** = rarity-gated + corroboration-required. Strong: LOLBIN / legacy-TLS / self-signed-to-public / no-TLS-extensions. Weak (need 2): no-SNI / no-ALPN / user-path / SNI=IP / abnormal cipher count. A self-CA cert (issuer has no `O=`) approximates a JA4X C2 cert; an **age discount** demotes aged, widespread fingerprints. Verdict tops out at **Critical**.
 - **Beaconing** = low coefficient-of-variation on inter-arrival times.
 - **First-seen / cipher-cycling** = brand-new JA4 in the estate; one JA4_ac with many cipher variants.
-- **Known-bad (opt-in)** = exact JA4+JA4S match against FoxIO's public ja4plus-mapping (embedded static table, not a premium feed). Toggle **Known-bad lookup = On** in the workbook to enable.
+- **Known-bad (opt-in)** = exact JA4+JA4S match against FoxIO's public ja4plus-mapping (embedded static table, not a premium feed), plus a JA4X-approximation on self-CA cert structure. Toggle **Known-bad lookup = On** in the workbook to enable.
+- **C2 tradecraft** = the JA4 b-section (chars 10-21, sorted-cipher hash) is a stable TLS-**library** identifier; a contradiction with the attributed process (browser library from a non-browser, Python/Go from a LOLBIN, any TLS from a script-host LOLBIN) catches uTLS parroting / injection / loaders. A TLS1.2 + no-ALPN + LOLBIN shape (or the exact Cobalt Strike c-section / server JA4S) catches CS / Meterpreter.
+- **FP suppression** = known-good library+process pairs and Microsoft-issued certs are down-weighted; Microsoft destinations are excluded from the tradecraft detectors.
 
 ## Performance
 Every query uses a `has "ja4"` term-index prefilter before `todynamic()`, a single-pass rarity computation,
