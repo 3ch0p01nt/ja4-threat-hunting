@@ -46,7 +46,7 @@
             "typeSettings": {
               "additionalResourceOptions": []
             },
-            "jsonData": "[{\"value\":\"leads\",\"label\":\"1. Top Leads (start here)\",\"selected\":true},{\"value\":\"triage\",\"label\":\"2. Suspicious triage\"},{\"value\":\"tradecraft\",\"label\":\"3. C2 tradecraft\"},{\"value\":\"endpoint\",\"label\":\"4. Endpoint corroboration\"},{\"value\":\"identity\",\"label\":\"5. Identity & cloud\"},{\"value\":\"beacon\",\"label\":\"6. Beaconing\"},{\"value\":\"incidents\",\"label\":\"7. Incident match\"},{\"value\":\"new\",\"label\":\"8. New & cipher-cycling\"},{\"value\":\"destanom\",\"label\":\"9. Destination anomalies\"},{\"value\":\"knownbad\",\"label\":\"10. Known-bad (opt-in)\"},{\"value\":\"overview\",\"label\":\"Summary (reference)\"},{\"value\":\"inventory\",\"label\":\"Inventory & hygiene (reference)\"},{\"value\":\"baseline\",\"label\":\"Process baseline (reference)\"},{\"value\":\"landscape\",\"label\":\"Rarity landscape (reference)\"}]",
+            "jsonData": "[{\"value\":\"leads\",\"label\":\"1. Top Leads (start here)\",\"selected\":true},{\"value\":\"triage\",\"label\":\"2. Suspicious triage\"},{\"value\":\"tradecraft\",\"label\":\"3. C2 tradecraft\"},{\"value\":\"endpoint\",\"label\":\"4. Endpoint corroboration\"},{\"value\":\"identity\",\"label\":\"5. Identity & cloud\"},{\"value\":\"beacon\",\"label\":\"6. Beaconing\"},{\"value\":\"incidents\",\"label\":\"7. Incident match\"},{\"value\":\"new\",\"label\":\"8. New & cipher-cycling\"},{\"value\":\"destanom\",\"label\":\"9. Destination anomalies\"},{\"value\":\"knownbad\",\"label\":\"10. Known-bad (opt-in)\"},{\"value\":\"overview\",\"label\":\"Summary (reference)\"},{\"value\":\"inventory\",\"label\":\"Inventory & hygiene (reference)\"},{\"value\":\"baseline\",\"label\":\"Process baseline (reference)\"},{\"value\":\"landscape\",\"label\":\"Rarity landscape (reference)\"},{\"value\":\"glossary\",\"label\":\"Glossary & methodology (reference)\"}]",
             "value": "leads"
           },
           {
@@ -109,6 +109,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-100: the strongest engine score for this lead (suspicion, beaconing or incident-fidelity). Higher = more urgent. Work red rows first."
                     }
                   },
                   {
@@ -135,7 +138,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -242,6 +344,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -268,7 +373,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -375,6 +579,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -401,7 +608,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -572,6 +878,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-100: weighted malice signals (LOLBIN +35, legacy-TLS +25, self-signed-public +30, no-extensions +20, SNI=IP +15, few/many-ciphers, no-SNI/no-ALPN, user-path) minus benign discounts. >=80 Critical, >=50 High, >=30 Medium."
                     }
                   },
                   {
@@ -579,6 +888,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "green"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-1 combined rarity (inverse prevalence): rare only when on FEW hosts AND FEW connections. 1.0 = a near-unique fingerprint. The Min-rarity selector gates on this."
                     }
                   },
                   {
@@ -605,7 +917,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -727,6 +1138,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-100 = 100 x specificity x time-decay x rarity x incident-severity. How tightly this fingerprint ties to an incident. >=75 High, >=40 Medium, >=20 Low."
                     }
                   },
                   {
@@ -734,6 +1148,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "green"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-1 combined rarity (inverse prevalence): rare only when on FEW hosts AND FEW connections. 1.0 = a near-unique fingerprint. The Min-rarity selector gates on this."
                     }
                   },
                   {
@@ -760,7 +1177,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -806,6 +1322,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-100 = 100 x (1 - jitter). 100 = perfectly periodic call-home (classic C2 shape)."
                     }
                   },
                   {
@@ -813,6 +1332,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "green"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-1 combined rarity (inverse prevalence): rare only when on FEW hosts AND FEW connections. 1.0 = a near-unique fingerprint. The Min-rarity selector gates on this."
                     }
                   },
                   {
@@ -839,7 +1361,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -885,6 +1506,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Endpoints showing this BRAND-NEW fingerprint. Spread across multiple hosts at once can be a deploying implant."
                     }
                   },
                   {
@@ -911,7 +1535,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -968,7 +1691,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1090,6 +1912,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -1116,7 +1941,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1223,6 +2147,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -1249,7 +2176,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1302,6 +2328,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-100: weighted malice signals (LOLBIN +35, legacy-TLS +25, self-signed-public +30, no-extensions +20, SNI=IP +15, few/many-ciphers, no-SNI/no-ALPN, user-path) minus benign discounts. >=80 Critical, >=50 High, >=30 Medium."
                     }
                   },
                   {
@@ -1328,7 +2357,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1359,6 +2487,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "green"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-1 combined rarity (inverse prevalence): rare only when on FEW hosts AND FEW connections. 1.0 = a near-unique fingerprint. The Min-rarity selector gates on this."
                     }
                   },
                   {
@@ -1385,7 +2516,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1492,6 +2722,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-100: weighted malice signals (LOLBIN +35, legacy-TLS +25, self-signed-public +30, no-extensions +20, SNI=IP +15, few/many-ciphers, no-SNI/no-ALPN, user-path) minus benign discounts. >=80 Critical, >=50 High, >=30 Medium."
                     }
                   },
                   {
@@ -1518,7 +2751,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1647,6 +2979,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "green"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "0-1 combined rarity (inverse prevalence): rare only when on FEW hosts AND FEW connections. 1.0 = a near-unique fingerprint. The Min-rarity selector gates on this."
                     }
                   },
                   {
@@ -1673,7 +3008,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1730,7 +3164,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1787,7 +3320,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -1916,6 +3548,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -1942,7 +3577,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2049,6 +3783,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -2075,7 +3812,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2182,6 +4018,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of connections observed for this row."
                     }
                   },
                   {
@@ -2208,7 +4047,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2337,6 +4275,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -2363,7 +4304,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2394,6 +4434,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of connections observed for this row."
                     }
                   },
                   {
@@ -2420,7 +4463,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2451,6 +4593,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of DISTINCT full fingerprints. High under one JA4_ac = cipher-cycling; high on one device = a randomizing implant."
                     }
                   },
                   {
@@ -2477,7 +4622,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2523,6 +4767,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "blue"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
                     }
                   },
                   {
@@ -2549,7 +4796,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2712,6 +5058,9 @@
                     "formatter": 8,
                     "formatOptions": {
                       "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of connections observed for this row."
                     }
                   },
                   {
@@ -2738,7 +5087,106 @@
                     "formatOptions": {},
                     "label": "TLS library",
                     "tooltipFormat": {
-                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
                     }
                   }
                 ]
@@ -2754,6 +5202,35 @@
         ]
       },
       "name": "g-knownbad"
+    },
+    {
+      "type": 12,
+      "conditionalVisibility": {
+        "parameterName": "Section",
+        "comparison": "isEqualTo",
+        "value": "glossary"
+      },
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Glossary - what each NUMBER means\r\n\r\nHover any column in a results grid for the same definition. Verdicts/Severity always read: **Critical** (red, act now) > **High** > **Medium** (amber) > **Low / Info** (blue).\r\n\r\n- **Score** (Top Leads) - 0-100, the strongest engine score for that lead (suspicion, beaconing or incident-fidelity). Higher = more urgent.\r\n- **SuspicionScore** (triage) - 0-100 from weighted malice signals (LOLBIN +35, legacy-TLS +25, self-signed-to-public +30, no-extensions +20, self-CA +10, SNI=IP +15, few/many ciphers, no-SNI, user-path, no-ALPN) minus benign discounts (aged & widespread -15, known-good library+process -30, Microsoft-issued cert -20). >=80 Critical, >=50 High, >=30 Medium.\r\n- **MatchFidelity** (incident match) - 0-100 = 100 x specificity x temporal-decay x rarity x incident-severity. How tightly the fingerprint ties to an incident. >=75 High, >=40 Medium, >=20 Low.\r\n- **MatchTier** - the closeness of an incident match: flow-exact (same TLS flow) > host+time > host-any > shared-IP.\r\n- **BeaconScore** - 0-100 = 100 x (1 - jitter). 100 = a perfectly periodic call-home (classic C2 shape).\r\n- **JitterCV** - coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = suspicious; above ~1 = irregular = usually benign.\r\n- **MeanIntervalMin / SpanHours** - average minutes between call-homes / hours the beacon series spanned.\r\n- **Rarity** - 0 to 1 combined inverse-prevalence: a fingerprint is rare only when seen on FEW hosts AND in FEW connections. 1.0 = a near-unique fingerprint. The **Min rarity** selector gates every detection on this.\r\n- **Devices / DistinctDevices** - endpoints that showed the fingerprint (fewer = rarer / more targeted). **Conns / TotalConnections** - connections observed.\r\n- **DistinctJA4s** - number of distinct full fingerprints. Many under one **JA4_ac** = cipher-cycling; many on one device = a randomising implant.\r\n- **DaysActive** - first-seen to last-seen span. Long + widespread = usually legitimate software.\r\n- **TimeGapMin / MinutesFromEmail / ClosestMatch** - minutes between the JA4 callout and the corroborating event (risky sign-in, cloud upload, phishing email, incident alert). Smaller = a stronger correlation.\r\n- **bsec / Client JA4 / Server JA4S** - the **b-section** (JA4 chars 11-22) is the TLS-LIBRARY id; **ja4_** / **ja4s_** are the client / server fingerprints; **ja4_ac** = a+c sections (drops the cipher hash) to track cipher-cycling actors.\r\n- **cipherCnt / extCnt** - number of ciphers / extensions in the ClientHello. Zero extensions or fewer than 4 ciphers = a primitive/hand-rolled tool; more than ~60 ciphers = a scanner or SoftEther."
+            },
+            "name": "gl-nums"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Glossary - what each QUERY (section) finds\r\n\r\n- **Top Leads** - the single ranked queue across all engines, plus process-contradictions and Cobalt Strike shapes. *Start here.*\r\n- **Suspicious triage** - every rare JA4 x JA4S pair scored for maliciousness (process + certificate + structure signals).\r\n- **Incident match** - rare fingerprints tied to your existing incidents, ranked by closeness.\r\n- **Beaconing** - regular, low-jitter TLS call-homes (the classic C2 shape).\r\n- **New & cipher-cycling** - brand-new fingerprints in the estate, and tools rotating ciphers to evade hashing (JA4_ac).\r\n- **C2 tradecraft** - a TLS library that does not match its process (uTLS parroting / injection / PUP), and TLS 1.2 + no-ALPN Cobalt Strike / Meterpreter shapes.\r\n- **Endpoint corroboration** - a rare JA4 fused with a Mark-of-the-Web download (dropper), an ASR/Defender alert on the same device (detonation), or suspicious process lineage.\r\n- **Identity & cloud** - a rare JA4 fused with a risky Entra sign-in (AiTM session theft), an unsanctioned-app cloud upload (exfil), or a delivered phishing email (phish -> implant).\r\n- **Destination anomalies** - rare JA4 to a TRUSTED cloud/CDN from a non-browser (living-off-trusted-sites), encrypted/absent SNI (ECH), and non-browser libraries reaching external SaaS (shadow-IT).\r\n- **Inventory & hygiene** - clients still using deprecated TLS (compliance), structurally-impossible/synthetic fingerprints, and cross-OS / fingerprint-proliferation anomalies.\r\n- **Process baseline** *(reference)* - the known-good (process -> TLS library) catalog, used to learn the estate and tune the mismatch allowlists.\r\n- **Rarity landscape** *(reference)* - the distribution of fingerprints by rarity; the right-hand bars are the rare tail you hunt in.\r\n- **Known-bad (opt-in)** - exact matches against FoxIO's public known-malware JA4+JA4S list (toggle on)."
+            },
+            "name": "gl-q"
+          }
+        ]
+      },
+      "name": "g-glossary"
     },
     {
       "type": 1,
