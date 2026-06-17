@@ -108,7 +108,7 @@ let dlProcs =
 // ── 6. SSL connections filtered to rare / structurally suspicious pairs ─────────
 let sslFiltered =
     ssl
-    | join kind=inner (rareOrSusp | project ja4_, ja4s_, R) on ja4_, ja4s_
+    | lookup kind=inner (rareOrSusp | project ja4_, ja4s_, R) on ja4_, ja4s_
     | project TimeGenerated, DeviceId, RemoteIP, RemotePort,
               ja4_, ja4s_, sni, issuer, noSNI, noALPN, selfSig, legacyTLS, R;
 // ── 7. Corroborate: downloaded-file process made a rare/susp TLS callout ────────

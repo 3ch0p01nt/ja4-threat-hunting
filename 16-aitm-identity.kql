@@ -33,7 +33,7 @@ let rareSet = materialize(
     | project ja4_, R);
 let candidates = materialize(
     sslPub
-    | join kind=leftouter rareSet on ja4_
+    | lookup kind=leftouter rareSet on ja4_
     | extend R = coalesce(R, 0.0)
     | where R >= minRarity or nonBrowser or ja4_ == evilginxJa4);
 let devUpn = materialize(

@@ -31,7 +31,7 @@ let ssl =
     | where strlen(ja4_) >= 22
     | extend bsec = substring(ja4_, 11, 12)
     | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
-    | summarize ja4_ = take_any(ja4_), sni = take_any(sni), DeviceName = take_any(DeviceName), isPublic = max(isPublic),
+    | summarize ja4_ = take_any(ja4_), sni = take_any(sni), isPublic = max(isPublic),
                 Conns = count(), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
             by DeviceId, RemoteIP, RemotePort, bsec;
 let procs =

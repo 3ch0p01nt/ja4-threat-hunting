@@ -44,7 +44,7 @@ ssl
 | mv-apply T = array_sort_asc(Timestamps) to typeof(datetime) on (
       extend delta = datetime_diff('second', T, prev(T))
       | where isnotnull(delta) and delta > 0
-      | summarize Intervals = count(), MeanSec = avg(delta), StdevSec = stdev(delta)
+      | summarize MeanSec = avg(delta), StdevSec = stdev(delta)
   )
 | where MeanSec between (minIntervalSec .. maxIntervalSec)
 | extend CV = iff(MeanSec == 0, 1.0, StdevSec / MeanSec)

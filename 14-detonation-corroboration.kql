@@ -65,7 +65,7 @@ let rare = materialize(
 // Cartesian product with detonation signals stays small after the time filter.
 let sslRare =
     ssl
-    | join kind=inner (rare | project ja4_, ja4s_, R) on ja4_, ja4s_
+    | lookup kind=inner (rare | project ja4_, ja4s_, R) on ja4_, ja4s_
     | project sslTime = TimeGenerated, DeviceId, DeviceName, RemoteIP,
               ja4_, ja4s_, sni, issuer, selfSig, R;
 // ── 2. Detonation signal A: ASR rule fires ─────────────────────────────────────

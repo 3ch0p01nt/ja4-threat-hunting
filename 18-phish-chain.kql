@@ -29,7 +29,7 @@ let rareSet = materialize(
     | extend R = min_of(Rhost, Rconn)
     | where R >= minRarity
     | project ja4_, R);
-let rareSsl = materialize(sslPub | join kind=inner rareSet on ja4_ | project ConnTime, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R);
+let rareSsl = materialize(sslPub | lookup kind=inner rareSet on ja4_ | project ConnTime, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R);
 let phishEmails = materialize(
     EmailEvents
     | where TimeGenerated > ago(lookback)

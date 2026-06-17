@@ -25,7 +25,7 @@ let ssl =
     | extend tlsVer = substring(ja4_, 1, 2), alpn = substring(ja4_, 8, 2), csec = substring(ja4_, 24, 12)
     | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
     | where isPublic and ((tlsVer == "12" and alpn == "00") or ja4s_ == csJa4s or csec == csCsec)
-    | summarize Conns = count(), DeviceName = take_any(DeviceName), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+    | summarize Conns = count(), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
             by DeviceId, RemoteIP, RemotePort, ja4_, ja4s_, tlsVer, alpn, csec, sni;
 let procs =
     DeviceNetworkEvents

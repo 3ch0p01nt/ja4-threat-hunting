@@ -13,10 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Bicep
-        run: az bicep install
+      - name: Install Bicep (skip if already present)
+        run: az bicep version || az bicep install
 
-      - name: Build Bicep (compiles main.bicep + embedded workbook-content.json)
+      - name: Build Bicep (syntax-compile main.bicep)
         run: az bicep build --file deploy/main.bicep --outfile "${RUNNER_TEMP}/main.json"
 
       - name: Validate JSON artifacts are well-formed
@@ -30,3 +30,17 @@ jobs:
           do
             python3 -c "import json,sys; json.load(open(sys.argv[1])); print('valid:', sys.argv[1])" "$f"
           done
+
+      - name: Assert workbook copies are in sync (no drift)
+        run: |
+          python3 - <<'PY'
+          import json
+          rd = lambda p: json.load(open(p, encoding='utf-8'))
+          wb = rd('07-ja4-threat-hunting-workbook.json')
+          ad = rd('deploy/azuredeploy.json')
+          wc = rd('deploy/workbook-content.json')
+          sd = json.loads(ad['resources'][0]['properties']['serializedData'])
+          assert wb == wc, 'drift: 07-workbook != deploy/workbook-content.json'
+          assert wb == sd, 'drift: 07-workbook != azuredeploy.json serializedData'
+          print('workbook copies in sync:', len(json.dumps(wb)), 'chars')
+          PY

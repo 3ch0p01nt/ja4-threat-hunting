@@ -7,8 +7,8 @@ and **Azure Government (IL5)** (`usgovvirginia`, `usgovarizona`, DoD regions).
 ## Contents
 | File | Purpose |
 |---|---|
-| `main.bicep` | **Recommended.** Bicep that loads the workbook via `loadTextContent()`. |
-| `workbook-content.json` | The workbook definition (serialized). Edited by Bicep/ARM at deploy. |
+| `main.bicep` | **Recommended.** Bicep; takes the workbook JSON as a `serializedData` parameter (the workbook exceeds Bicep's 128 KB `loadTextContent()` limit). |
+| `workbook-content.json` | The serialized workbook definition — pass it to `main.bicep` as `serializedData=@workbook-content.json`. |
 | `azuredeploy.json` | ARM template (workbook embedded) — for ARM-only pipelines / portal. |
 | `azuredeploy.parameters.json` | Fill in your workspace ID + region. |
 | `Deploy-Ja4Workbook.ps1` | Gov-aware az-CLI helper (sets cloud, parses sub/RG, deploys). |
@@ -36,7 +36,7 @@ az monitor log-analytics workspace show -g <workspace-rg> -n <workspace-name> --
 ### Option A — Bicep (recommended)
 ```powershell
 az deployment group create -g <workspace-rg> --template-file main.bicep `
-  --parameters workspaceResourceId="<workspace-resource-id>" location="usgovvirginia"
+  --parameters workspaceResourceId="<workspace-resource-id>" location="usgovvirginia" serializedData=@workbook-content.json
 ```
 
 ### Option B — ARM template

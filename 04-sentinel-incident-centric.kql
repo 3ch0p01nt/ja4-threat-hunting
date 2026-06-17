@@ -32,7 +32,7 @@ let rare = materialize(
     | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
     | extend R = min_of(Rhost, Rconn)
     | where R >= minRarity);
-let rareConns = ja4conn | join kind=inner (rare | project ja4_, ja4s_) on ja4_, ja4s_ | project cTime, DeviceId, RemoteIP, sni, ja4_, ja4s_;
+let rareConns = ja4conn | join kind=leftsemi (rare | project ja4_, ja4s_) on ja4_, ja4s_ | project cTime, DeviceId, RemoteIP, sni, ja4_, ja4s_;
 let incMap =
     SecurityIncident
     | where TimeGenerated > ago(lookback)
