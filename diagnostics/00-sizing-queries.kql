@@ -1,0 +1,202 @@
+// ============================================================================
+// JA4 workbook - TENANT SIZING / DIAGNOSTIC QUERIES
+// ----------------------------------------------------------------------------
+// Purpose: measure the orders-of-magnitude in YOUR workspace so the workbook KQL
+// can be tuned to real volumes (you reported a ~365K-device tenant where the
+// whole-fleet joins hit the 5GB limit).
+//
+// HOW TO USE
+//   1. Run each numbered block below in Log Analytics / the Defender AH portal
+//      (Sentinel schema; if you run in Defender Advanced Hunting use Timestamp
+//      instead of TimeGenerated).
+//   2. Paste the (small) result of each block back to me.
+//   3. I use the numbers to pick thresholds, gating strategy, sample sizes, and
+//      whether a panel needs the rarity gate / a shorter window.
+//
+// Each block is self-contained (a block = everything between two ==== headers,
+// run it on its own). Blocks start at a 1-DAY window to stay cheap; the rarity
+// blocks use 7d to match the workbook default. Bump `win` for a wider sample; if
+// a block itself times out, lower `win`.
+// ============================================================================
+
+
+// ============================================================================
+// 1. BASE TABLE VOLUMES  (the foundational scan sizes)
+//    Tells me: how big the SSL scan is vs the ConnectionSuccess "firehose", and
+//    therefore how much the process-attribution gating buys us. The ratio
+//    ConnectionSuccess : SSL is the single most important number.
+// ============================================================================
+let win = 1d;
+union isfuzzy=true
+  (DeviceNetworkEvents | where TimeGenerated > ago(win) | summarize Rows=count() | extend What="1 DeviceNetworkEvents (ALL ActionTypes)"),
+  (DeviceNetworkEvents | where TimeGenerated > ago(win) and ActionType == "SslConnectionInspected" | summarize Rows=count() | extend What="2   SslConnectionInspected"),
+  (DeviceNetworkEvents | where TimeGenerated > ago(win) and ActionType == "SslConnectionInspected" and AdditionalFields has "ja4" | summarize Rows=count() | extend What="3     SSL rows carrying ja4"),
+  (DeviceNetworkEvents | where TimeGenerated > ago(win) and ActionType == "ConnectionSuccess" | summarize Rows=count() | extend What="4 ConnectionSuccess (ALL)"),
+  (DeviceNetworkEvents | where TimeGenerated > ago(win) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName) | summarize Rows=count() | extend What="5   ConnectionSuccess with a process")
+| project What, RowsPerDay = Rows
+| sort by What asc
+
+
+// ============================================================================
+// 2. SSL FINGERPRINT CARDINALITIES  (the join key-spaces)
+//    Tells me: device count, distinct FLOWS (the join key), and how many distinct
+//    fingerprints/pairs exist. Drives shuffle-vs-broadcast choices and whether a
+//    pair-level summarize is tractable.
+// ============================================================================
+let win = 1d;
+DeviceNetworkEvents
+| where TimeGenerated > ago(win) and ActionType == "SslConnectionInspected" and AdditionalFields has "ja4"
+| extend AF = todynamic(AdditionalFields)
+| extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s)
+| where isnotempty(ja4_)
+| extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+| extend flow = strcat(DeviceId, "|", RemoteIP, "|", tostring(RemotePort))
+| summarize Devices       = dcount(DeviceId),
+            Flows         = dcount(flow),
+            PublicFlows   = dcountif(flow, isPublic),
+            DistinctJA4   = dcount(ja4_),
+            DistinctJA4S  = dcount(ja4s_),
+            DistinctPairs = dcount(strcat(ja4_, "_", ja4s_)),
+            SSLConns      = count()
+
+
+// ============================================================================
+// 3. TLS-LIBRARY (b-section) DISTRIBUTION  (browser-exclusion impact)
+//    Tells me: how dominant browser libraries are. If browsers dominate, excluding
+//    them from the mismatch/c2 joins (already done) is a big win; the non-browser
+//    tail is the shadow-IT panel's true size.
+// ============================================================================
+let win = 1d;
+DeviceNetworkEvents
+| where TimeGenerated > ago(win) and ActionType == "SslConnectionInspected" and AdditionalFields has "ja4"
+| extend ja4_ = tostring(todynamic(AdditionalFields).ja4)
+| where strlen(ja4_) >= 22
+| extend bsec = substring(ja4_, 11, 12)
+| summarize Conns = count(), Devices = dcount(DeviceId) by bsec
+| extend Library = case(bsec in ("8daaf6152771","55b375c5d22e"), "Chromium",
+                        bsec == "5b57614c22b0", "Firefox",
+                        bsec == "a09f3c656075", "Safari",
+                        bsec == "d83cc789557e", "WinINET",
+                        bsec == "76e208dd3e22", "WinHTTP",
+                        bsec == "85036bcba153", "Python",
+                        bsec in ("9dc949149365","f57a46bbacb6"), "Go",
+                        "other")
+| sort by Conns desc
+| take 25
+
+
+// ============================================================================
+// 4a. ConnectionSuccess PROCESS SUMMARY  (attribution-gating impact)
+//     Tells me: how rare LOLBIN connections are (so the c2-shape "start from
+//     LOLBINs" branch is genuinely small) and the total process firehose size.
+// ============================================================================
+let win = 1d;
+let lolbins = dynamic(["rundll32.exe","regsvr32.exe","mshta.exe","wscript.exe","cscript.exe","cmd.exe","msiexec.exe","powershell.exe","pwsh.exe","msbuild.exe","hh.exe","installutil.exe","regsvcs.exe","regasm.exe","certutil.exe","bitsadmin.exe","wmic.exe"]);
+DeviceNetworkEvents
+| where TimeGenerated > ago(win) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+| extend Proc = tolower(InitiatingProcessFileName)
+| summarize TotalConnSuccess = count(),
+            LolbinConns      = countif(Proc in~ (lolbins)),
+            DistinctProcs    = dcount(Proc)
+| extend LolbinPctOfTotal = round(100.0 * LolbinConns / TotalConnSuccess, 5)
+
+
+// ============================================================================
+// 4b. TOP 25 PROCESSES by ConnectionSuccess volume  (browser/WebView dominance)
+//     Tells me: how much of the firehose is browser/WebView (excluded from the
+//     mismatch join) vs everything else.
+// ============================================================================
+let win = 1d;
+DeviceNetworkEvents
+| where TimeGenerated > ago(win) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+| summarize Conns = count() by Proc = tolower(InitiatingProcessFileName)
+| sort by Conns desc
+| take 25
+
+
+// ============================================================================
+// 5. RARITY-GATE EFFECTIVENESS  (the most important tuning number)  [7-day]
+//    Tells me: how much the rarity gate shrinks the data at Min rarity 0.7 / 0.85
+//    / 0.95 - i.e. how small the rare-gated panels become, and whether bumping the
+//    default Min rarity would make the heavy panels comfortable at your scale.
+// ============================================================================
+let win = 7d;
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(win) and ActionType == "SslConnectionInspected" and AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s)
+    | where isnotempty(ja4_)
+    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | where isPublic;
+let pairs = ssl | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_, ja4s_;
+let totalConns = toscalar(pairs | summarize sum(Conns));
+let totalDevs  = toscalar(ssl   | summarize dcount(DeviceId, 4));
+let scored = pairs
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn);
+scored
+| summarize TotalPairs    = count(),
+            TotalConns    = sum(Conns),
+            RarePairs_070 = countif(R >= 0.70), RareConns_070 = sumif(Conns, R >= 0.70),
+            RarePairs_085 = countif(R >= 0.85), RareConns_085 = sumif(Conns, R >= 0.85),
+            RarePairs_095 = countif(R >= 0.95), RareConns_095 = sumif(Conns, R >= 0.95)
+| extend RareConnPct_070 = round(100.0 * RareConns_070 / TotalConns, 4),
+         RareConnPct_085 = round(100.0 * RareConns_085 / TotalConns, 4),
+         RareConnPct_095 = round(100.0 * RareConns_095 / TotalConns, 4)
+
+
+// ============================================================================
+// 6a. C2-SHAPE BRANCH SIZES  [7-day]
+//     Tells me: how big the TLS1.2+no-ALPN "shape" set is vs the (tiny) exact
+//     Cobalt Strike fingerprint set - confirms the two-branch restructure is small.
+// ============================================================================
+let win = 7d;
+let csJa4s = "t120300_c030_52d195ce1d92";
+let csCsec = "16bbda4055b2";
+DeviceNetworkEvents
+| where TimeGenerated > ago(win) and ActionType == "SslConnectionInspected" and AdditionalFields has "ja4"
+| extend AF = todynamic(AdditionalFields)
+| extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s)
+| where strlen(ja4_) >= 36
+| extend tlsVer = substring(ja4_, 1, 2), alpn = substring(ja4_, 8, 2), csec = substring(ja4_, 24, 12)
+| extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+| where isPublic
+| summarize AllPublicSSL = count(),
+            ShapeFlows   = countif(tlsVer == "12" and alpn == "00"),
+            ExactCSFlows = countif(ja4s_ == csJa4s or csec == csCsec)
+
+
+// ============================================================================
+// 6b. CORRELATION / FUSION TABLE VOLUMES  [7-day]
+//     Tells me: the sizes of the tables the corroboration panels join to (alerts,
+//     files, sign-ins, cloud, email) - large ones may need their own gating.
+//     (isfuzzy tolerates tables that don't exist in your tenant - e.g. IdentityInfo.)
+// ============================================================================
+let win = 7d;
+union isfuzzy=true
+  (SecurityIncident  | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="SecurityIncident"),
+  (SecurityAlert     | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="SecurityAlert"),
+  (AlertEvidence     | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="AlertEvidence(all)"),
+  (AlertEvidence     | where TimeGenerated > ago(win) and EntityType == "Machine" | summarize v=count() | extend Tbl="AlertEvidence(Machine)"),
+  (DeviceFileEvents  | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="DeviceFileEvents"),
+  (DeviceLogonEvents | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="DeviceLogonEvents"),
+  (DeviceInfo        | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="DeviceInfo"),
+  (SigninLogs        | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="SigninLogs"),
+  (CloudAppEvents    | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="CloudAppEvents"),
+  (EmailEvents       | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="EmailEvents"),
+  (IdentityInfo      | where TimeGenerated > ago(win) | summarize v=count() | extend Tbl="IdentityInfo")
+| project Tbl, Rows7d = v
+| sort by Rows7d desc
+
+
+// ============================================================================
+// 7. (OPTIONAL but BEST) REAL QUERY COST via the engine's own statistics
+//    Numbers above are row counts; the truest signal is "data processed".
+//    In Log Analytics: run a heavy panel, then open "Query details" (bottom-right
+//    of the results) and read "Data processed" + "CPU time". If you can grab those
+//    for the Top Leads and Process-mismatch panels at 7d, that pins the tuning.
+//    (API equivalent: send header  Prefer: include-statistics  and read
+//     statistics.query.inputDatasetStatistics.rows / .extents.)
+// ============================================================================
