@@ -1,0 +1,51 @@
+// ============================================================================
+// wb_phish - PHISH -> IMPLANT CHAIN  (Microsoft Sentinel)
+// ----------------------------------------------------------------------------
+// Chains a DELIVERED phishing/malware email to a rare outbound TLS fingerprint on
+// the recipient's device within 2 h (email-click -> implant callback). Chain:
+// EmailEvents (ThreatTypes Phish/Malware, DeliveryAction!=Blocked) -> recipient
+// UPN -> DeviceLogonEvents DeviceId -> rare JA4 callout AFTER delivery.
+// EmailEvents is sparse outside IL5/GCC-High; returns 0 rows cleanly.
+// ============================================================================
+let lookback     = 30d;
+let minRarity    = 0.7;
+let phish_window = 2h;
+let sslPub =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false
+    | extend bsec = substring(ja4_, 11, 12), cipherCnt = toint(substring(ja4_, 4, 2))
+    | project ConnTime = TimeGenerated, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt;
+let pairAgg    = materialize(sslPub | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_);
+let totalConns = toscalar(pairAgg | summarize sum(Conns));
+let totalDevs  = toscalar(sslPub  | summarize dcount(DeviceId, 4));
+let rareSet = materialize(
+    pairAgg
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R);
+let rareSsl = materialize(sslPub | join kind=inner rareSet on ja4_ | project ConnTime, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R);
+let phishEmails = materialize(
+    EmailEvents
+    | where TimeGenerated > ago(lookback)
+    | where ThreatTypes has_any (dynamic(["Phish","Malware"])) and DeliveryAction != "Blocked"
+    | project EmailTime = TimeGenerated, RecipientEmailAddress = tolower(RecipientEmailAddress), Subject, ThreatTypes, DetectionMethods, SenderFromAddress, SenderMailFromDomain, NetworkMessageId);
+let recipientDevices = materialize(
+    DeviceLogonEvents
+    | where TimeGenerated > ago(lookback) and isnotempty(AccountName) and isnotempty(DeviceId)
+    | summarize DeviceId = take_any(DeviceId), DeviceName = take_any(DeviceName) by Acct = tolower(AccountName));
+phishEmails
+| extend RecipPrefix = tolower(tostring(split(RecipientEmailAddress, "@")[0]))
+| join kind=inner (recipientDevices | project Acct, DeviceId, DeviceName) on $left.RecipPrefix == $right.Acct
+| join kind=inner (rareSsl | project DeviceId, ConnTime, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R) on DeviceId
+| where ConnTime > EmailTime and (ConnTime - EmailTime) <= phish_window
+| extend MinutesFromEmail = round(datetime_diff('second', ConnTime, EmailTime) / 60.0, 1)
+| extend Why = strcat("Phish->implant chain: ", ThreatTypes, " email delivered (", SenderMailFromDomain, ") then rare JA4 callout on recipient device within 2h; detect=", DetectionMethods, "; bsec=", bsec, " ciphers=", tostring(cipherCnt))
+| project RecipientEmailAddress, Subject, ThreatTypes, DetectionMethods, SenderFromAddress, SenderMailFromDomain, EmailTime,
+          DeviceName, ja4_, ja4s_, bsec, cipherCnt, Rarity = round(R, 2), RemoteIP, SNI = sni, ConnTime, MinutesFromEmail, Why
+| sort by MinutesFromEmail asc, EmailTime desc

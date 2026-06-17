@@ -1,0 +1,114 @@
+// ============================================================================
+// wb_shadowit.kql - SHADOW-IT / NON-BROWSER SaaS ACCESS  (inventory)
+//                   Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// The JA4 b-section (chars 10-21, sorted-cipher hash) is a stable TLS-library
+// identifier. When a Python, Go, or UNKNOWN automation-library fingerprint
+// reaches a PUBLIC, non-Microsoft SaaS / API endpoint, it reveals scripts,
+// agents, or unapproved tools communicating with external services — shadow-IT.
+//
+// THIS IS AN INVENTORY QUERY (informational). No rarity gate, no alert threshold.
+// Everything surfaced is observed behaviour; the analyst determines approval status.
+// Known browser b-sections and OS-layer stacks (WinINET, WinHTTP) are suppressed
+// early — they are too voluminous and too ambiguous for shadow-IT discovery.
+// SoftEther (VPN tunnelling library) is retained and labelled explicitly.
+//
+// Interest levels (not severities):
+//   HIGH-INTEREST   = non-dev-tool process in a user/temp path
+//   MEDIUM-INTEREST = process name NOT in the known dev-tool list
+//   LOW-INTEREST    = expected dev/automation executable (python.exe, go.exe, etc.)
+//
+// Use-cases: data-exfil scripts, unapproved SaaS integrations, vendor agents,
+// supply-chain runners, CI/CD pipelines lacking IT inventory visibility.
+// Sources: FoxIO ja4plus-mapping (b-section map); MITRE ATT&CK T1567.
+// ============================================================================
+let lookback = 30d;
+let pythonBsec   = "85036bcba153";
+let goBsec       = dynamic(["9dc949149365","f57a46bbacb6"]);
+// Suppress browser stacks and OS-layer TLS: high-volume and not automation libraries.
+let suppressBsec = dynamic([
+    "8daaf6152771","55b375c5d22e",   // Chromium (TCP, QUIC)
+    "5b57614c22b0",                  // Firefox
+    "a09f3c656075",                  // Safari
+    "d83cc789557e",                  // WinINET  (OS-layer; too noisy for shadow-IT)
+    "76e208dd3e22"]);                // WinHTTP  (OS-layer; too noisy for shadow-IT)
+// Microsoft-managed destinations are enterprise-controlled; exclude them.
+let msSni = dynamic([".microsoft.com",".windows.com",".windowsupdate.com",".office.com",
+    ".office365.com",".sharepoint.com",".onedrive.com",".microsoftonline.com",".azure.com",
+    ".azureedge.net",".msedge.net",".msftconnecttest.com",".windows.net",".bing.com",
+    ".live.com",".skype.com"]);
+// Known dev / automation executables: Python / Go / cloud-CLI use is EXPECTED here.
+// Add estate-specific tools (e.g. internal runner names) to suppress LOW-INTEREST noise.
+let devProcs = dynamic([
+    "python.exe","python3.exe","pythonw.exe","conda.exe","jupyter.exe",
+    "go.exe","gopls.exe","dlv.exe","node.exe","npm.exe","yarn.exe","pnpm.exe",
+    "curl.exe","wget.exe","git.exe","terraform.exe","kubectl.exe","helm.exe",
+    "aws.exe","az.exe","gcloud.exe","pip.exe","pip3.exe","poetry.exe",
+    "gradle.exe","mvn.exe","cargo.exe","rustc.exe","ansible-playbook.exe"]);
+// Base: automation-library SSL to public non-MS destinations.
+// Browser and OS-layer b-sections are dropped before todynamic() cost is paid.
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and strlen(ja4_) >= 22
+    | extend bsec     = substring(ja4_, 11, 12)
+    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    // Drop known-browser and OS-layer stacks early; drop Microsoft destinations early.
+    | where not(bsec in (suppressBsec)) and isPublic
+    | where not(isnotempty(sni) and sni has_any (msSni))
+    | extend LibraryName = case(
+        bsec == pythonBsec,    "Python",
+        bsec in (goBsec),      "Go",
+        bsec == "fcb5b95cb75a","SoftEther",
+        strcat("unknown (b=", bsec, ")"))
+    | project TimeGenerated, DeviceId, RemoteIP, RemotePort,
+              ja4_, ja4s_, sni, bsec, LibraryName;
+// Process attribution: leftouter — unattributed rows (possible injected code or
+// services) are still valuable inventory; they surface as Proc = "(unattributed)".
+let procs =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess"
+      and isnotempty(InitiatingProcessFileName)
+    | summarize Proc       = take_any(tolower(InitiatingProcessFileName)),
+                ProcFolder = take_any(InitiatingProcessFolderPath),
+                Signer     = take_any(InitiatingProcessVersionInfoCompanyName)
+            by DeviceId, RemoteIP, RemotePort;
+ssl
+| join hint.shufflekey=DeviceId kind=leftouter procs on DeviceId, RemoteIP, RemotePort
+| extend Proc       = coalesce(Proc, "(unattributed)")
+| extend isDevProc  = (Proc in~ (devProcs))
+| extend isUserPath = (ProcFolder has "appdata" or ProcFolder hasprefix "c:\\users\\"
+                        or ProcFolder has "\\temp\\" or ProcFolder has "\\downloads\\")
+| summarize
+    Devices       = dcount(DeviceId, 4),
+    Conns         = count(),
+    SampleSNIs    = make_set(coalesce(sni, tostring(RemoteIP)), 8),
+    SampleFolders = make_set(ProcFolder, 3),
+    SampleSigners = make_set(Signer, 3),
+    AnyDevProc    = max(isDevProc),
+    AnyUserPath   = max(isUserPath),
+    FirstSeen     = min(TimeGenerated),
+    LastSeen      = max(TimeGenerated)
+  by LibraryName, bsec, Proc
+| extend Interest = case(
+    not(AnyDevProc) and AnyUserPath,
+        "HIGH-INTEREST - non-dev-tool in user/temp path",
+    not(AnyDevProc),
+        "MEDIUM-INTEREST - process not in dev-tool list",
+        "LOW-INTEREST - known dev/automation tool (expected)")
+| extend Why = strcat(
+    LibraryName, " TLS library to external SaaS/API; proc=", Proc, "; ",
+    iff(not(AnyDevProc), "NOT a known dev tool; ", "known dev tool; "),
+    iff(AnyUserPath,     "user/temp path; ", ""),
+    strcat("b=", bsec))
+// SevOrd for sort: HIGH-INTEREST=1, MEDIUM=2, LOW=3
+| extend SevOrd = case(not(AnyDevProc) and AnyUserPath, 1, not(AnyDevProc), 2, 3)
+| project Interest, LibraryName, bsec, Proc, SampleSNIs, SampleFolders,
+          SampleSigners, Devices, Conns, AnyDevProc, AnyUserPath,
+          Why, FirstSeen, LastSeen, SevOrd
+| sort by SevOrd asc, Devices desc, Conns desc
+| project-away SevOrd
+

@@ -76,7 +76,7 @@ rare
 | where StrongCount >= 1 or WeakCount >= 2              // CORROBORATION
 | extend DaysActive = datetime_diff('day', LastSeen, FirstSeen)
 | extend AgePenalty = iff(DaysActive > 14 and DistinctDevices >= 3, -15, 0)   // benign-rollout discount
-| extend bsec = substring(ja4_, 10, 12), ProcsSafe = coalesce(Procs, dynamic([]))
+| extend bsec = substring(ja4_, 11, 12), ProcsSafe = coalesce(Procs, dynamic([]))
 | extend knownGoodLib = (   // known TLS library used by its EXPECTED process -> down-weight (FP cut)
        (bsec in ("8daaf6152771", "55b375c5d22e") and array_length(set_intersect(ProcsSafe, dynamic(["chrome.exe","msedge.exe","brave.exe","opera.exe","vivaldi.exe","arc.exe","msedgewebview2.exe","teams.exe","ms-teams.exe","slack.exe","code.exe","discord.exe"]))) > 0)
     or (bsec == "5b57614c22b0" and array_length(set_intersect(ProcsSafe, dynamic(["firefox.exe","thunderbird.exe","tor.exe","librewolf.exe"]))) > 0)
@@ -97,3 +97,4 @@ rare
 | project ja4_, ja4s_, Verdict, SuspicionScore, Reasons, Procs, SampleSNIs, Issuers,
           Rarity = round(R, 2), DistinctDevices, DistinctRemoteIPs, TotalConnections, DaysActive, FirstSeen, LastSeen
 | sort by SuspicionScore desc, Rarity desc, DistinctDevices asc
+

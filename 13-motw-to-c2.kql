@@ -1,0 +1,159 @@
+// ============================================================================
+// wb_motw - MARK-OF-THE-WEB → FIRST C2 CALLOUT  (E5 / Defender XDR-native)
+//           Platform: Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// Hunts for a binary freshly downloaded from the web (DeviceFileEvents FileCreated
+// + FileOriginUrl populated = MOTW-eligible write to disk) that within 24 h
+// initiates a TLS connection to a PUBLIC, non-Microsoft destination with a RARE
+// or structurally suspicious JA4 (no-SNI | no-ALPN | self-signed cert | legacy
+// TLS | IDF rarity >= minRarity).
+// Correlation key (same DeviceId):
+//   SHA1-exact : DeviceFileEvents.SHA1 == ConnectionSuccess.InitiatingProcessSHA1
+//   filename   : DeviceFileEvents.FileName =~ ConnectionSuccess.InitiatingProcessFileName
+//                (weaker – common names e.g. setup.exe may false-positive; see FP note)
+// SuspicionScore: structural JA4 flags (self-signed=25, no-SNI=20, legacy=20,
+//   no-ALPN=12) + SHA1-match bonus (+10) + rapid-callout bonus (≤30 min=+20,
+//   ≤240 min=+10) + unsigned-process bonus (+15). Soft cap ~100.
+// PERF: downloads is small → materialize; ssl/procs/sslFiltered are table
+//   expressions (re-scanned, never materialized); rareOrSusp is a small pair-
+//   level gate → materialize. Final join fans out only where a rare JA4 and a
+//   MOTW-attributed process share the same flow key, which is rare by design.
+// Sources: MOTW/Mark-of-the-Web; FoxIO JA4 structural spec;
+//          MITRE ATT&CK T1204.002, T1071.001, T1566.001.
+// ============================================================================
+let lookback      = 30d;
+let minRarity     = 0.7;
+let calloutWindow = 24h;   // TLS callout must occur within this window after download
+let msSni = dynamic([".microsoft.com",".windows.com",".windowsupdate.com",".office.com",
+                     ".office365.com",".sharepoint.com",".onedrive.com",".microsoftonline.com",
+                     ".azure.com",".azureedge.net",".msedge.net",".msftconnecttest.com",
+                     ".windows.net",".bing.com",".live.com",".skype.com"]);
+// ── 1. Web-downloaded files (MOTW signal) ──────────────────────────────────────
+// FileCreated + FileOriginUrl != "" = browser/downloader wrote the file from the
+// internet (MOTW-eligible).  De-dup by (DeviceId, FileName, FileSHA1) to collapse
+// parallel download retries without losing distinct-hash downloads of the same name.
+let downloads = materialize(
+    DeviceFileEvents
+    | where TimeGenerated > ago(lookback)
+    | where ActionType == "FileCreated" and isnotempty(FileOriginUrl) and isnotempty(SHA1)
+    | summarize DownloadTime          = min(TimeGenerated),
+                FileOriginUrl         = take_any(FileOriginUrl),
+                FileOriginReferrerUrl = take_any(FileOriginReferrerUrl),
+                DownloadFolder        = take_any(FolderPath),
+                DeviceName            = take_any(DeviceName)
+            by DeviceId, FileName, FileSHA1 = SHA1);
+// ── 2. SSL base: public + non-MS + has JA4 ─────────────────────────────────────
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF      = todynamic(AdditionalFields)
+    | extend ja4_    = tostring(AF.ja4),    ja4s_   = tostring(AF.ja4s),
+             sni     = tostring(AF.server_name),
+             issuer  = tostring(AF.issuer), subject = tostring(AF.subject)
+    | where isnotempty(ja4_)
+    | where (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | where not(isnotempty(sni) and sni has_any(msSni))
+    | extend noSNI     = (substring(ja4_, 3, 1) == "i")
+    | extend noALPN    = (substring(ja4_, 8, 2) == "00")
+    | extend selfSig   = (isnotempty(issuer) and issuer == subject)
+    | extend legacyTLS = (substring(ja4_, 1, 2) in ("10","11","s3","s2"))
+    | project TimeGenerated, DeviceId, RemoteIP, RemotePort,
+              ja4_, ja4s_, sni, issuer, noSNI, noALPN, selfSig, legacyTLS;
+// ── 3. Rarity + structural gate on JA4 pairs (small aggregate → materialize) ───
+// Passes a pair if it is rare by IDF *or* carries any structural suspicion flag.
+// Structural gate ensures newly-appearing implants are caught before rarity accrues.
+let agg = materialize(
+    ssl
+    | summarize TotalConns      = count(),
+                DistinctDevices = dcount(DeviceId, 4),
+                AnyNoSNI        = max(noSNI),    AnyNoALPN  = max(noALPN),
+                AnySelfSig      = max(selfSig),  AnyLegacy  = max(legacyTLS)
+            by ja4_, ja4s_);
+let totalConns   = toscalar(agg | summarize sum(TotalConns));
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));
+let rareOrSusp = materialize(
+    agg
+    | extend Rhost = iff(totalDevices <= 1, 1.0,
+                 max_of(0.0, log(todouble(totalDevices) / todouble(DistinctDevices))
+                             / log(todouble(totalDevices))))
+    | extend Rconn = iff(totalConns   <= 1, 1.0,
+                 max_of(0.0, log(todouble(totalConns)   / todouble(TotalConns))
+                             / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity or AnyNoSNI or AnyNoALPN or AnySelfSig or AnyLegacy);
+// ── 4. Process attribution (ConnectionSuccess, de-duped by flow key) ───────────
+// Flow-key de-dup → ±180 s time window is dropped per toolkit convention.
+let procs =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess"
+    | where isnotempty(InitiatingProcessFileName)
+    | summarize Proc       = take_any(tolower(InitiatingProcessFileName)),
+                ProcFolder = take_any(InitiatingProcessFolderPath),
+                ProcSHA1   = take_any(InitiatingProcessSHA1),
+                Signer     = take_any(InitiatingProcessVersionInfoCompanyName),
+                Parent     = take_any(tolower(InitiatingProcessParentFileName))
+            by DeviceId, RemoteIP, RemotePort;
+// ── 5. Link downloads → procs (same DeviceId; SHA1-exact or filename match) ────
+// Inner join on DeviceId only; SHA1/filename filter applied as a row predicate.
+// MatchType signals correlation strength to the analyst.
+let dlProcs =
+    downloads
+    | join hint.shufflekey=DeviceId kind=inner procs on DeviceId
+    | where ProcSHA1 == FileSHA1 or Proc =~ FileName
+    | extend MatchType = iff(ProcSHA1 == FileSHA1, "SHA1-exact", "filename")
+    | project DeviceId, DeviceName, DownloadTime, FileName, DownloadFolder, FileSHA1,
+              FileOriginUrl, FileOriginReferrerUrl,
+              RemoteIP, RemotePort, Proc, ProcFolder, ProcSHA1, Signer, Parent, MatchType;
+// ── 6. SSL connections filtered to rare / structurally suspicious pairs ─────────
+let sslFiltered =
+    ssl
+    | join kind=inner (rareOrSusp | project ja4_, ja4s_, R) on ja4_, ja4s_
+    | project TimeGenerated, DeviceId, RemoteIP, RemotePort,
+              ja4_, ja4s_, sni, issuer, noSNI, noALPN, selfSig, legacyTLS, R;
+// ── 7. Corroborate: downloaded-file process made a rare/susp TLS callout ────────
+// Three-way correlation: MOTW file → process (SHA1/name) → rare/susp TLS flow.
+// Time gate: TLS callout must occur AFTER the download and within calloutWindow.
+dlProcs
+| join hint.shufflekey=DeviceId kind=inner sslFiltered on DeviceId, RemoteIP, RemotePort
+| where TimeGenerated between (DownloadTime .. DownloadTime + calloutWindow)
+| summarize
+    FirstCallout  = min(TimeGenerated),
+    CalloutCount  = count(),
+    ja4_          = take_any(ja4_),         ja4s_     = take_any(ja4s_),
+    sni           = take_any(sni),          issuer    = take_any(issuer),
+    noSNI         = max(noSNI),             noALPN    = max(noALPN),
+    selfSig       = max(selfSig),           legacyTLS = max(legacyTLS),
+    Rarity        = round(take_any(R), 2)
+    by DeviceId, DeviceName, DownloadTime, FileName, DownloadFolder, FileSHA1,
+       FileOriginUrl, FileOriginReferrerUrl,
+       Proc, ProcFolder, ProcSHA1, Signer, Parent, RemoteIP, MatchType
+| extend MinutesSinceDownload = round(
+    todouble(datetime_diff('second', FirstCallout, DownloadTime)) / 60.0, 1)
+| extend SuspicionScore =
+      iff(selfSig,    25, 0)
+    + iff(noSNI,      20, 0)
+    + iff(legacyTLS,  20, 0)
+    + iff(noALPN,     12, 0)
+    + iff(MatchType == "SHA1-exact", 10, 5)                    // stronger correlation = bonus
+    + iff(MinutesSinceDownload < 30,  20,                      // rapid first callout (<30 min)
+      iff(MinutesSinceDownload < 240, 10, 0))                  // called out within 4 h
+    + iff(isempty(Signer), 15, 0)                              // unsigned calling process
+| extend Why = set_difference(pack_array(
+      iff(selfSig,    "self-signed cert",               ""),
+      iff(noSNI,      "no-SNI to public dest",          ""),
+      iff(legacyTLS,  "legacy TLS (<1.2)",              ""),
+      iff(noALPN,     "no-ALPN",                        ""),
+      strcat("MOTW download → callout in ", tostring(MinutesSinceDownload), " min"),
+      strcat(MatchType, " process correlation"),
+      iff(isempty(Signer), "unsigned process",
+                           strcat("signer=", Signer))),
+    dynamic([""]))
+| project
+    DeviceName, DownloadTime, FileName, DownloadFolder, FileSHA1,
+    FileOriginUrl, FileOriginReferrerUrl,
+    Proc, ProcFolder, Signer, Parent, MatchType,
+    FirstCallout, MinutesSinceDownload, CalloutCount,
+    RemoteIP, sni, ja4_, ja4s_, issuer,
+    Rarity, SuspicionScore, Why
+| sort by SuspicionScore desc, MinutesSinceDownload asc, DownloadTime desc

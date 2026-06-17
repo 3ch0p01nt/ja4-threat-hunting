@@ -14,7 +14,7 @@
 // Sources: FoxIO ja4plus-mapping (b-section library map); LOLBAS.
 // ============================================================================
 let lookback = 30d;
-let chromiumProcs = dynamic(["chrome.exe","msedge.exe","brave.exe","opera.exe","vivaldi.exe","arc.exe","msedgewebview2.exe","teams.exe","ms-teams.exe","slack.exe","code.exe","discord.exe","whatsapp.exe","spotify.exe","signal.exe","notion.exe","postman.exe","1password.exe"]);
+let chromiumProcs = dynamic(["chrome.exe","msedge.exe","brave.exe","opera.exe","vivaldi.exe","arc.exe","msedgewebview2.exe","cefsharp.browsersubprocess.exe","teams.exe","ms-teams.exe","slack.exe","code.exe","discord.exe","whatsapp.exe","spotify.exe","signal.exe","notion.exe","postman.exe","1password.exe"]);
 let firefoxProcs  = dynamic(["firefox.exe","thunderbird.exe","tor.exe","waterfox.exe","librewolf.exe"]);
 let lolbinProcs   = dynamic(["rundll32.exe","regsvr32.exe","mshta.exe","wscript.exe","cscript.exe","cmd.exe","msiexec.exe","hh.exe"]);
 let chromiumBsec  = dynamic(["8daaf6152771","55b375c5d22e"]);
@@ -29,7 +29,7 @@ let ssl =
     | extend AF = todynamic(AdditionalFields)
     | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
     | where strlen(ja4_) >= 22
-    | extend bsec = substring(ja4_, 10, 12)
+    | extend bsec = substring(ja4_, 11, 12)
     | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
     | summarize ja4_ = take_any(ja4_), sni = take_any(sni), DeviceName = take_any(DeviceName), isPublic = max(isPublic),
                 Conns = count(), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
@@ -58,3 +58,4 @@ ssl
 | extend Severity = case(Proc in~ (lolbinProcs) or AnyUserPath, "High", "Medium")
 | project Severity, Mismatch, Proc, bsec, ja4_, Devices, Conns, AnyUserPath, ProcFolders, Dests, FirstSeen, LastSeen
 | sort by Severity asc, Devices asc, Conns asc
+

@@ -1,0 +1,49 @@
+// ============================================================================
+// wb_baseline - PROCESS -> JA4 GROUND-TRUTH BASELINE  (inventory helper)
+//     Platform: Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// For every (attributed process, TLS-library b-section) pair in the estate, show
+// prevalence (DistinctDevices, TotalConns, signer, sample SNIs). This is the
+// KNOWN-GOOD catalog: learn your fleet's expected process<->JA4 pairs (esp.
+// Teams/OneDrive/Outlook/WinHTTP, which public DBs lack) and use it to tune the
+// mismatch-detector (11) and FP-suppression allowlists. No rarity gate - this is
+// the inventory of COMMON pairs (most-trusted first). Source: FoxIO b-section map.
+// ============================================================================
+let lookback = 30d;
+let libMap = datatable(bsec:string, lib:string) [
+    "8daaf6152771","Chromium (TCP)",
+    "55b375c5d22e","Chromium (QUIC)",
+    "5b57614c22b0","Firefox",
+    "a09f3c656075","Safari/WebKit/iOS",
+    "85036bcba153","Python",
+    "9dc949149365","Go <1.22",
+    "f57a46bbacb6","Go >=1.22",
+    "d83cc789557e","WinINET",
+    "76e208dd3e22","WinHTTP",
+    "fcb5b95cb75a","SoftEther VPN",
+];
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and strlen(ja4_) >= 22
+    | extend bsec = substring(ja4_, 11, 12)
+    | summarize sni = take_any(sni), Conns = count(), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+            by DeviceId, RemoteIP, RemotePort, bsec, ja4_;
+let procs =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+    | summarize Proc = take_any(tolower(InitiatingProcessFileName)), Signer = take_any(InitiatingProcessVersionInfoCompanyName)
+            by DeviceId, RemoteIP, RemotePort;
+ssl
+| join hint.shufflekey=DeviceId kind=inner procs on DeviceId, RemoteIP, RemotePort
+| lookup kind=leftouter libMap on bsec
+| extend Library = coalesce(lib, strcat("other (", bsec, ")"))
+| summarize DistinctDevices = dcount(DeviceId, 4), TotalConns = sum(Conns), DistinctJA4s = dcount(ja4_, 4),
+            Signers = make_set(Signer, 3), SampleSNIs = make_set(sni, 6), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen)
+        by Proc, Library, bsec
+| project Proc, Library, bsec, DistinctDevices, TotalConns, DistinctJA4s, Signers, SampleSNIs, FirstSeen, LastSeen
+| sort by DistinctDevices desc, TotalConns desc
+

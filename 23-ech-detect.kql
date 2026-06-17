@@ -1,0 +1,123 @@
+// ============================================================================
+// wb_ech.kql - ECH / ENCRYPTED-SNI FLAG
+//              Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// ECH (Encrypted Client Hello, RFC 9180) hides the real SNI from network-layer
+// inspection by encrypting the inner ClientHello. Two observable JA4 proxies:
+//   1. JA4 pos-3 == "i" (no cleartext SNI) AND ALPN in ("h1","h2") to a PUBLIC
+//      destination: browser-like traffic with the real destination hidden.
+//      This is the most common ECH/ESNI signal in a Defender-inspected estate.
+//   2. SNI == "cloudflare-ech.com", endswith "-ech.com", or sni has "ech.":
+//      the ECH bootstrap hostname Cloudflare publishes as the outer server name
+//      in the initial ClientHello before the encrypted inner hello is delivered.
+// ECH is RARE-BUT-RISING: Cloudflare enabled it by default for ~25% of HTTPS in
+// 2023; Chrome 117+ uses it automatically for Cloudflare origins. Browser-initiated
+// ECH is EXPECTED and labelled INFO. Non-browser or LOLBIN ECH warrants triage
+// because implants and proxy tools leverage ECH to blind SNI-based detection.
+// All rows are surfaced; triage by Verdict, process, and TLS library.
+// Sources: RFC 9180; draft-ietf-tls-esni-24; Cloudflare ECH blog (2023).
+// ============================================================================
+let lookback = 30d;
+let browserProcs = dynamic([
+    "chrome.exe","msedge.exe","firefox.exe","brave.exe","opera.exe","vivaldi.exe",
+    "arc.exe","msedgewebview2.exe","teams.exe","ms-teams.exe","slack.exe","code.exe","discord.exe"]);
+let lolbinProcs = dynamic([
+    "rundll32.exe","regsvr32.exe","mshta.exe","powershell.exe","pwsh.exe","wscript.exe",
+    "cscript.exe","certutil.exe","bitsadmin.exe","msbuild.exe","installutil.exe","regasm.exe",
+    "regsvcs.exe","cmstp.exe","wmic.exe","hh.exe","cmd.exe","msiexec.exe"]);
+// Base: detect ECH proxy signals before the process join.
+// strlen >= 10 ensures enough bytes to read the ALPN field at positions 8-9.
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and strlen(ja4_) >= 10
+    | extend isPublic    = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | extend noSniFlag   = (substring(ja4_, 3, 1) == "i")
+    | extend alpn        = substring(ja4_, 8, 2)
+    | extend browserAlpn = (alpn in ("h2","h1"))
+    // ECH bootstrap: outer SNI is a known ECH placeholder; real dest is encrypted.
+    | extend echBootSni  = (isnotempty(sni)
+                            and (sni == "cloudflare-ech.com"
+                                 or sni endswith "-ech.com"
+                                 or sni has "ech."))
+    // ECH candidate: no cleartext SNI in JA4, but ALPN signals a browser-like
+    // HTTP session to a public IP — real destination is opaque.
+    | extend echNoSni    = (noSniFlag and browserAlpn and isPublic)
+    | where isPublic and (echBootSni or echNoSni)
+    | extend EchCategory = iff(echBootSni,
+                               "ECH-bootstrap-SNI",
+                               "no-SNI+browser-ALPN (ECH candidate)")
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort,
+              ja4_, ja4s_, sni, alpn, EchCategory;
+// Process attribution: leftouter so ECH from kernel / system paths still surfaces.
+// Unattributed rows (no ConnectionSuccess match) are labelled explicitly.
+let procs =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess"
+      and isnotempty(InitiatingProcessFileName)
+    | summarize Proc       = take_any(tolower(InitiatingProcessFileName)),
+                ProcFolder = take_any(InitiatingProcessFolderPath),
+                Signer     = take_any(InitiatingProcessVersionInfoCompanyName)
+            by DeviceId, RemoteIP, RemotePort;
+ssl
+| join hint.shufflekey=DeviceId kind=leftouter procs on DeviceId, RemoteIP, RemotePort
+| extend Proc          = coalesce(Proc, "(unattributed)")
+| extend bsec          = substring(ja4_, 11, 12)
+| extend LibHint       = case(
+    bsec in ("8daaf6152771","55b375c5d22e"), "Chromium",
+    bsec == "5b57614c22b0",                  "Firefox",
+    bsec == "85036bcba153",                  "Python",
+    bsec in ("9dc949149365","f57a46bbacb6"), "Go",
+    bsec == "d83cc789557e",                  "WinINET",
+    bsec == "76e208dd3e22",                  "WinHTTP",
+    bsec == "fcb5b95cb75a",                  "SoftEther",
+    "other")
+| extend isBrowserProc = (Proc in~ (browserProcs))
+| extend isLolbin      = (Proc in~ (lolbinProcs))
+| extend isUserPath    = (ProcFolder has "appdata" or ProcFolder hasprefix "c:\\users\\"
+                           or ProcFolder has "\\temp\\" or ProcFolder has "\\downloads\\")
+| summarize
+    Devices        = dcount(DeviceId, 4),
+    Conns          = count(),
+    Procs          = make_set(Proc, 6),
+    SampleDests    = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+    SampleDevices  = make_set(DeviceName, 4),
+    AnyBrowserProc = max(isBrowserProc),
+    AnyLolbin      = max(isLolbin),
+    AnyUserPath    = max(isUserPath),
+    LibHint        = take_any(LibHint),
+    FirstSeen      = min(TimeGenerated),
+    LastSeen       = max(TimeGenerated)
+  by ja4_, ja4s_, alpn, EchCategory
+| extend Verdict = case(
+    AnyLolbin,
+        "HIGH - ECH/no-SNI from LOLBIN (triage immediately)",
+    not(AnyBrowserProc) and AnyUserPath,
+        "MEDIUM - ECH from user-path non-browser process",
+    not(AnyBrowserProc),
+        "REVIEW - ECH from non-browser process",
+        "INFO - ECH from browser (expected; low priority)")
+| extend Why = strcat(
+    EchCategory, "; ",
+    iff(AnyLolbin,
+        strcat("LOLBIN [", tostring(Procs), "]; "), ""),
+    iff(AnyUserPath and not(AnyBrowserProc),
+        "user-path proc; ", ""),
+    iff(AnyBrowserProc,
+        "browser-initiated (normal); ", "non-browser-initiated; "),
+    strcat("TLS-lib=", LibHint, "; ALPN=", alpn))
+// Numeric sort key: HIGH=1, MEDIUM=2, REVIEW=3, INFO=4
+| extend SevOrd = case(
+    AnyLolbin,                           1,
+    not(AnyBrowserProc) and AnyUserPath, 2,
+    not(AnyBrowserProc),                 3,
+    4)
+| project Verdict, EchCategory, ja4_, ja4s_, Why, Procs, LibHint,
+          SampleDests, SampleDevices, Devices, Conns,
+          AnyBrowserProc, AnyLolbin, AnyUserPath, FirstSeen, LastSeen, SevOrd
+| sort by SevOrd asc, Devices desc
+| project-away SevOrd
+

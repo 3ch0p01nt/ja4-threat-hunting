@@ -1,0 +1,133 @@
+// ============================================================================
+// wb_lots.kql - LIVING-OFF-TRUSTED-SITES / DOMAIN-FRONTING PARADOX
+//               Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// A RARE JA4 fingerprint reaching a TRUSTED cloud / CDN / SaaS SNI from a
+// NON-browser or LOLBIN process is the Living-Off-Trusted-Sites (LOTS) pattern:
+// the implant / loader routes C2 traffic through a legitimately-trusted domain
+// (Azure Blob, GitHub raw, Discord, Telegram bot API, ngrok, trycloudflare, etc.)
+// while the TLS fingerprint betrays an unusual client library. The paradox:
+//   trusted destination  ×  untrusted/unexpected client  =  LOTS signal
+// Rarity is computed globally so a fingerprint novel anywhere in the estate is
+// caught, even if it only contacts trusted SNIs. Browser processes are suppressed
+// because they ARE expected at every entry in trustedSni.
+//   CRITICAL = LOLBIN process  |  HIGH = user/temp-path  |  MEDIUM = other non-browser
+// Cross-reference 06-ja4-beaconing.kql for low-jitter timing on the same pairs.
+// Sources: CISA AA23-061A (LOTS); MITRE ATT&CK T1071.001, T1102.
+// ============================================================================
+let lookback  = 30d;
+let minRarity = 0.7;
+let trustedSni = dynamic([
+    "azurewebsites.net","blob.core.windows.net",".workers.dev","cloudfront.net",
+    "amazonaws.com","githubusercontent.com","raw.githubusercontent.com","api.github.com",
+    "pastebin.com","discord.com","discordapp.com","slack.com","telegram.org","t.me",
+    "api.telegram.org","googleapis.com","drive.google.com","dropbox.com","onedrive.live.com",
+    "firebaseio.com","herokuapp.com","ngrok.io",".trycloudflare.com"]);
+let browserProcs = dynamic([
+    "chrome.exe","msedge.exe","firefox.exe","brave.exe","opera.exe","vivaldi.exe",
+    "arc.exe","msedgewebview2.exe","teams.exe","ms-teams.exe","slack.exe","code.exe","discord.exe"]);
+let lolbinProcs = dynamic([
+    "rundll32.exe","regsvr32.exe","mshta.exe","powershell.exe","pwsh.exe","wscript.exe",
+    "cscript.exe","certutil.exe","bitsadmin.exe","msbuild.exe","installutil.exe","regasm.exe",
+    "regsvcs.exe","cmstp.exe","wmic.exe","hh.exe","cmd.exe","msiexec.exe"]);
+// Base: per-connection table, NOT materialized (5 GB cache risk at production scale).
+// `has "ja4"` is a term-index prefilter that skips todynamic() on non-JA4 rows.
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_)
+    | extend isTrustedSni = (isnotempty(sni) and sni has_any (trustedSni))
+    | extend isPublic     = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort,
+              ja4_, ja4s_, sni, isTrustedSni, isPublic;
+// Global rarity per (ja4_, ja4s_) pair. AnyTrusted flags pairs that contacted a trusted SNI.
+// Small result -> safe to materialize; avoids re-summarising the full ssl scan.
+let agg = materialize(
+    ssl
+    | summarize TotalConns      = count(),
+                DistinctDevices = dcount(DeviceId, 4),
+                AnyTrusted      = max(isTrustedSni),
+                TrustedSnis     = make_set_if(sni, isTrustedSni, 8)
+            by ja4_, ja4s_);
+let totalConns   = toscalar(agg | summarize sum(TotalConns));
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));
+// EARLY rarity gate + trusted-SNI gate: only rare pairs that reached a trusted SNI
+// feed the expensive process-attribution join below.
+let rare = materialize(
+    agg
+    | extend Rhost = iff(totalDevices <= 1, 1.0,
+                         max_of(0.0, log(todouble(totalDevices) / todouble(DistinctDevices))
+                                    / log(todouble(totalDevices))))
+    | extend Rconn = iff(totalConns <= 1, 1.0,
+                         max_of(0.0, log(todouble(totalConns) / todouble(TotalConns))
+                                    / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity and AnyTrusted);
+// Recover only the trusted-SNI + public connections from rare pairs.
+// ssl is re-evaluated (lazy let, not cached) but gated hard: only rare-pair rows pass.
+let rareConns =
+    ssl
+    | join kind=inner (rare | project ja4_, ja4s_) on ja4_, ja4s_
+    | where isTrustedSni and isPublic
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, ja4s_, sni;
+// Process attribution: de-dup by flow key before join to keep cardinality tractable.
+let procs =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess"
+      and isnotempty(InitiatingProcessFileName)
+    | summarize Proc       = take_any(tolower(InitiatingProcessFileName)),
+                ProcFolder = take_any(InitiatingProcessFolderPath),
+                Signer     = take_any(InitiatingProcessVersionInfoCompanyName)
+            by DeviceId, RemoteIP, RemotePort;
+rareConns
+| join hint.shufflekey=DeviceId kind=inner procs on DeviceId, RemoteIP, RemotePort
+// Browsers ARE expected at every trusted SNI; suppress to focus on the paradox.
+| where not(Proc in~ (browserProcs))
+| extend isLolbin   = (Proc in~ (lolbinProcs))
+| extend isUserPath = (ProcFolder has "appdata" or ProcFolder hasprefix "c:\\users\\"
+                       or ProcFolder has "\\temp\\" or ProcFolder has "\\downloads\\")
+| extend bsec    = substring(ja4_, 11, 12)
+| extend LibHint = case(
+    bsec in ("8daaf6152771","55b375c5d22e"), "Chromium",
+    bsec == "5b57614c22b0",                  "Firefox",
+    bsec == "85036bcba153",                  "Python",
+    bsec in ("9dc949149365","f57a46bbacb6"), "Go",
+    bsec == "d83cc789557e",                  "WinINET",
+    bsec == "76e208dd3e22",                  "WinHTTP",
+    bsec == "fcb5b95cb75a",                  "SoftEther",
+    "other")
+| summarize
+    Devices       = dcount(DeviceId, 4),
+    Conns         = count(),
+    Procs         = make_set(Proc, 6),
+    ProcFolders   = make_set(ProcFolder, 4),
+    SampleSNIs    = make_set(sni, 6),
+    SampleDevices = make_set(DeviceName, 4),
+    AnyLolbin     = max(isLolbin),
+    AnyUserPath   = max(isUserPath),
+    LibHint       = take_any(LibHint),
+    FirstSeen     = min(TimeGenerated),
+    LastSeen      = max(TimeGenerated)
+  by ja4_, ja4s_
+// Pull R and TrustedSnis from the materialised rare set (no extra scan).
+| join kind=inner (rare | project ja4_, ja4s_, R, TrustedSnis) on ja4_, ja4s_
+| extend Verdict = case(
+    AnyLolbin,   "CRITICAL - LOLBIN to trusted cloud SNI",
+    AnyUserPath, "HIGH - user/temp-path process to trusted cloud SNI",
+                 "MEDIUM - non-browser process to trusted cloud SNI")
+| extend Why = strcat(
+    "Rare JA4 to trusted CDN/cloud from non-browser (LOTS paradox); ",
+    iff(AnyLolbin,   strcat("LOLBIN [", tostring(Procs), "]; "), ""),
+    iff(AnyUserPath, "user/temp-path proc; ", ""),
+    strcat("TLS-lib=", LibHint, "; R=", round(R, 2)))
+// Numeric sort key so CRITICAL < HIGH < MEDIUM regardless of alphabetical order.
+| extend SevOrd = case(AnyLolbin, 1, AnyUserPath, 2, 3)
+| project Verdict, ja4_, ja4s_, Why, Procs, SampleSNIs, TrustedSnis,
+          LibHint, Devices, Conns, SampleDevices, AnyLolbin, AnyUserPath,
+          ProcFolders, Rarity = round(R, 2), FirstSeen, LastSeen, SevOrd
+| sort by SevOrd asc, Devices asc, Conns asc
+| project-away SevOrd
+

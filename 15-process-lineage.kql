@@ -1,0 +1,176 @@
+// ============================================================================
+// wb_lineage - PROCESS LINEAGE / PROVENANCE  (E5 / Defender XDR-native)
+//              Platform: Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// The process attributed to a RARE JA4 TLS callout (via ConnectionSuccess,
+// de-duped by flow key) is flagged when suspicious by PROVENANCE:
+//   High severity:
+//     • Office parent (winword/excel/powerpnt/outlook/onenote) spawned the
+//       network-calling child → classic spearphish / macro → loader chain
+//     • Browser parent spawning a non-browser child that makes TLS calls
+//       → drive-by / browser-exploit injected process
+//     • Unsigned process running from a user/temp/downloads path (both flags)
+//   Medium severity:
+//     • Unsigned process from a system/program-files path (less common FP)
+//     • Script-host parent: wscript/cscript/mshta/cmd/powershell as parent
+//     • Process runs from a user/AppData/Temp/Downloads/Desktop path alone
+// Correlation: rare-JA4 procs (ConnectionSuccess) → DeviceProcessEvents on
+//   (DeviceId, ProcessName) taking the MOST RECENT DPE event (arg_max on
+//   TimeGenerated) per (DeviceId, process) to get signer, parent, command line
+//   that ConnectionSuccess alone cannot supply.
+// PERF: agg/rare are small pair-level aggregates → materialize. procDetail uses
+//   arg_max to collapse DeviceProcessEvents to one row per (DeviceId, process)
+//   before the join. rareProcs is a table expression; it rescans ssl+procs once
+//   at final-join time — same pattern as the rest of the toolkit.
+// Sources: FoxIO b-section library map; LOLBAS; MITRE T1059, T1204, T1566.
+// ============================================================================
+let lookback       = 30d;
+let minRarity      = 0.7;
+let officeParents  = dynamic(["winword.exe","excel.exe","powerpnt.exe","outlook.exe",
+                              "onenote.exe","mspub.exe","visio.exe","access.exe"]);
+let browserParents = dynamic(["chrome.exe","msedge.exe","firefox.exe","iexplore.exe",
+                              "opera.exe","brave.exe","vivaldi.exe","arc.exe"]);
+let scriptParents  = dynamic(["wscript.exe","cscript.exe","mshta.exe","cmd.exe",
+                              "powershell.exe","pwsh.exe"]);
+let userPathFrags  = dynamic(["\\appdata\\","\\downloads\\","\\temp\\","\\tmp\\",
+                              "\\desktop\\","\\public\\"]);
+let msSni = dynamic([".microsoft.com",".windows.com",".windowsupdate.com",".office.com",
+                     ".office365.com",".sharepoint.com",".onedrive.com",".microsoftonline.com",
+                     ".azure.com",".azureedge.net",".msedge.net",".msftconnecttest.com",
+                     ".windows.net",".bing.com",".live.com",".skype.com"]);
+// ── 1. SSL base + rarity gate (standard IDF) ───────────────────────────────────
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF     = todynamic(AdditionalFields)
+    | extend ja4_   = tostring(AF.ja4),    ja4s_   = tostring(AF.ja4s),
+             sni    = tostring(AF.server_name),
+             issuer = tostring(AF.issuer), subject = tostring(AF.subject)
+    | where isnotempty(ja4_)
+    | where (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | where not(isnotempty(sni) and sni has_any(msSni))
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort,
+              ja4_, ja4s_, sni, issuer;
+let agg = materialize(
+    ssl
+    | summarize TotalConns      = count(),
+                DistinctDevices = dcount(DeviceId, 4)
+            by ja4_, ja4s_);
+let totalConns   = toscalar(agg | summarize sum(TotalConns));
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));
+let rare = materialize(
+    agg
+    | extend Rhost = iff(totalDevices <= 1, 1.0,
+                 max_of(0.0, log(todouble(totalDevices) / todouble(DistinctDevices))
+                             / log(todouble(totalDevices))))
+    | extend Rconn = iff(totalConns   <= 1, 1.0,
+                 max_of(0.0, log(todouble(totalConns)   / todouble(TotalConns))
+                             / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity);
+// ── 2. Process attribution (ConnectionSuccess, de-duped by flow key) ───────────
+// Flow-key de-dup → ±180 s time window is dropped per toolkit convention.
+let procs =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess"
+    | where isnotempty(InitiatingProcessFileName)
+    | summarize Proc       = take_any(tolower(InitiatingProcessFileName)),
+                ProcFolder = take_any(InitiatingProcessFolderPath),
+                ProcSHA1   = take_any(InitiatingProcessSHA1),
+                CS_Signer  = take_any(InitiatingProcessVersionInfoCompanyName),
+                CS_Parent  = take_any(tolower(InitiatingProcessParentFileName))
+            by DeviceId, RemoteIP, RemotePort;
+// ── 3. Rare SSL → attribute → collapse to (DeviceId, Proc, JA4 pair) ───────────
+// Two chained inner joins: first gates ssl to rare pairs (small build table),
+// second attributes each rare connection to a process via the flow key.
+// Summarised by (DeviceId, Proc, ja4_, ja4s_) — keeps distinct (process, JA4)
+// combinations separate so the analyst sees each unique fingerprint per process.
+let rareProcs =
+    ssl
+    | join kind=inner  (rare | project ja4_, ja4s_, R) on ja4_, ja4s_
+    | join hint.shufflekey=DeviceId kind=inner procs on DeviceId, RemoteIP, RemotePort
+    | summarize
+        sni        = take_any(sni),
+        issuer     = take_any(issuer),
+        Dests      = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+        ProcFolder = take_any(ProcFolder),
+        ProcSHA1   = take_any(ProcSHA1),
+        CS_Signer  = take_any(CS_Signer),
+        CS_Parent  = take_any(CS_Parent),
+        Conns      = count(),
+        Rarity     = round(take_any(R), 2),
+        LastSeen   = max(TimeGenerated)
+        by DeviceId, DeviceName, Proc, ja4_, ja4s_;
+// ── 4. DeviceProcessEvents: most-recent-event enrichment per (DeviceId, Proc) ───
+// arg_max(TimeGenerated) returns the freshest process-start record, avoiding stale
+// data from long-lived processes first seen at the start of the 30-day window.
+// Not materialize()d: the DPE scan is large; one row per (DeviceId, ProcessName)
+// is size-bounded but can reach tens of millions in large estates.
+let procDetail =
+    DeviceProcessEvents
+    | where TimeGenerated > ago(lookback) and isnotempty(FileName)
+    | summarize arg_max(TimeGenerated,
+                        ProcessVersionInfoCompanyName,
+                        FolderPath,
+                        InitiatingProcessFileName,
+                        InitiatingProcessParentFileName,
+                        ProcessCommandLine,
+                        SHA1)
+            by DeviceId, Proc = tolower(FileName);
+// ── 5. Enrich: rareProcs ← procDetail on (DeviceId, Proc) ──────────────────────
+// leftouter preserves rare-JA4 processes that never fired a DPE event in the
+// window (possible for long-running processes); FinalSigner/FinalParent fall back
+// to ConnectionSuccess values in that case.
+rareProcs
+| join hint.shufflekey=DeviceId kind=leftouter procDetail on DeviceId, Proc
+| extend DPE_Signer  = tostring(ProcessVersionInfoCompanyName)
+| extend DPE_Parent  = tolower(tostring(InitiatingProcessFileName))    // direct parent (DPE)
+| extend DPE_GParent = tolower(tostring(InitiatingProcessParentFileName))
+| extend DPE_Folder  = tostring(FolderPath)
+| extend DPE_CmdLine = tostring(ProcessCommandLine)
+// Prefer DPE values (exe-level events); fall back to ConnectionSuccess values.
+| extend FinalSigner = iff(isnotempty(DPE_Signer), DPE_Signer, CS_Signer)
+| extend FinalParent = iff(isnotempty(DPE_Parent), DPE_Parent, CS_Parent)
+| extend FinalFolder = iff(isnotempty(DPE_Folder), DPE_Folder, ProcFolder)
+// ── 6. Provenance flags ─────────────────────────────────────────────────────────
+| extend isBrowserProc = (Proc in~ (browserParents) or Proc in~ (dynamic(["msedgewebview2.exe","cefsharp.browsersubprocess.exe"])))
+| extend signedMainstream = (FinalSigner has "Microsoft" or FinalSigner has "Google" or FinalSigner has "Mozilla")
+| extend unsigned     = isempty(FinalSigner)
+| extend officeSpawn  = (FinalParent in~ (officeParents))
+| extend scriptSpawn  = (FinalParent in~ (scriptParents))
+// browser parent is only suspicious when it spawned a NON-browser network child (drive-by / injection),
+// NOT when a browser spawns its own renderer subprocess (normal).
+| extend browserToNonBrowser = (FinalParent in~ (browserParents) and not(isBrowserProc))
+| extend isUserPath   = (isnotempty(FinalFolder)
+                         and (FinalFolder has_any(userPathFrags)
+                              or FinalFolder hasprefix "c:\\users\\"))
+// ── 7. Gate: a STRONG provenance anomaly, excluding normal signed-browser traffic ──
+| where officeSpawn or scriptSpawn or browserToNonBrowser or (unsigned and isUserPath)
+| where not(isBrowserProc and signedMainstream)
+// ── 8. Severity + score ─────────────────────────────────────────────────────────
+| extend Severity = case(
+    officeSpawn or browserToNonBrowser, "High",   // document/browser spawning a non-browser network child
+    unsigned and isUserPath,            "High",   // unsigned binary in a user-writable path
+    scriptSpawn,                        "Medium", // script host as spawning parent
+                                        "Medium")
+| extend SuspicionScore =
+      iff(officeSpawn,          40, 0)
+    + iff(browserToNonBrowser,  35, 0)
+    + iff(scriptSpawn,          25, 0)
+    + iff(unsigned,             20, 0)
+    + iff(isUserPath,           15, 0)
+    + toint(round(Rarity * 20.0))            // rarity bonus: 0-20 pts
+| extend Why = set_difference(pack_array(
+      iff(officeSpawn,          strcat("Office parent: ",      FinalParent), ""),
+      iff(browserToNonBrowser,  strcat("browser parent -> non-browser child: ", FinalParent), ""),
+      iff(scriptSpawn,          strcat("script-host parent: ", FinalParent), ""),
+      iff(unsigned,             "unsigned process",                          ""),
+      iff(isUserPath,           strcat("user/temp path: ",     FinalFolder), "")),
+    dynamic([""]))
+| project
+    Severity, SuspicionScore,
+    Proc, FinalParent, DPE_GParent, FinalSigner, FinalFolder, DPE_CmdLine,
+    ja4_, ja4s_, sni, issuer, Dests,
+    DeviceName, Rarity, Conns, LastSeen, Why
+| sort by SuspicionScore desc, Rarity desc, Conns asc

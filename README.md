@@ -32,6 +32,11 @@ set **`workspaceResourceId`** to your Log Analytics / Sentinel workspace, then *
 | `10-known-malware-pairs.kql` | **Opt-in** known-bad JA4+JA4S lookup + JA4X-approx self-CA cert structure (public FoxIO data). |
 | `11-process-ja4-mismatch.kql` | Process vs JA4-library contradiction (b-section library ID) - uTLS parroting / injection / loaders. |
 | `12-c2-tls-shape.kql` | Cobalt Strike / Meterpreter shape: TLS1.2 + no-ALPN + LOLBIN to non-MS dest, or exact CS c-section / JA4S. |
+| `13`-`15` | **Endpoint corroboration**: Mark-of-the-Web->C2, detonation (rare JA4 + ASR/alert), suspicious process lineage. |
+| `16`-`18` | **Identity & cloud**: AiTM (risky Entra sign-in + rare JA4), cloud exfil (unsanctioned-app upload), phish->implant chain. |
+| `19`-`21` | **Inventory & hygiene**: deprecated-TLS compliance, structurally-impossible JA4, fleet cross-OS / JA4-proliferation. |
+| `22`-`24` | **Destination anomalies**: LOTS/domain-fronting paradox, ECH/hidden-SNI, shadow-IT (non-browser SaaS access). |
+| `25-process-ja4-baseline.kql` | Known-good (process -> TLS-library) catalog to learn the estate and tune allowlists. |
 | `deploy/` | ARM + Bicep + parameters + Gov-aware deploy script. |
 
 ## Scoring (core signals are data-driven; known-bad lookup is opt-in)

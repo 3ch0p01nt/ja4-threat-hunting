@@ -1,0 +1,57 @@
+// ============================================================================
+// wb_aitm - AiTM / SESSION-THEFT CORROBORATION  (Microsoft Sentinel)
+// ----------------------------------------------------------------------------
+// A user with a RISKY Entra sign-in (SigninLogs RiskLevelDuringSignIn high/medium)
+// whose DEVICE shows a rare or NON-BROWSER JA4 callout within +/-30 min - the
+// BEC / OAuth-token-theft (Evilginx/Modlishka) callout shape. Device<->user via
+// DeviceLogonEvents (AccountUpn==UserPrincipalName). Also flags the Evilginx JA4.
+// SigninLogs is sparse here; returns 0 rows cleanly. Defends the IL5 deployment.
+// ============================================================================
+let lookback    = 30d;
+let minRarity   = 0.7;
+let aitm_window = 30m;
+let evilginxJa4 = "t13d191000_9dc949149365_e7c285222651";
+let browserBsec = dynamic(["8daaf6152771","55b375c5d22e","5b57614c22b0","a09f3c656075"]);
+let sslPub =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and strlen(ja4_) >= 22 and isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false
+    | extend bsec = substring(ja4_, 11, 12), cipherCnt = toint(substring(ja4_, 4, 2))
+    | extend nonBrowser = (not(bsec in (browserBsec)) and not(cipherCnt between (15 .. 20)))
+    | project ConnTime = TimeGenerated, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, nonBrowser;
+let pairAgg    = materialize(sslPub | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_);
+let totalConns = toscalar(pairAgg | summarize sum(Conns));
+let totalDevs  = toscalar(sslPub  | summarize dcount(DeviceId, 4));
+let rareSet = materialize(
+    pairAgg
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | project ja4_, R);
+let candidates = materialize(
+    sslPub
+    | join kind=leftouter rareSet on ja4_
+    | extend R = coalesce(R, 0.0)
+    | where R >= minRarity or nonBrowser or ja4_ == evilginxJa4);
+let devUpn = materialize(
+    DeviceLogonEvents
+    | where TimeGenerated > ago(lookback) and isnotempty(AccountName) and isnotempty(DeviceId)
+    | summarize by DeviceId, Acct = tolower(AccountName));
+let risky = materialize(
+    SigninLogs
+    | where TimeGenerated > ago(lookback) and RiskLevelDuringSignIn in ("high","medium")
+    | project SignInTime = TimeGenerated, UPN = tolower(UserPrincipalName), UPNPrefix = tolower(tostring(split(UserPrincipalName, "@")[0])), RiskLevel = RiskLevelDuringSignIn, RiskState, SignInIP = IPAddress, Location, AppDisplayName);
+candidates
+| join kind=inner devUpn on DeviceId
+| join kind=inner risky on $left.Acct == $right.UPNPrefix
+| where abs(ConnTime - SignInTime) <= aitm_window
+| extend TimeGapMin = round(datetime_diff('second', ConnTime, SignInTime) / 60.0, 1)
+| extend IsEvilginx = (ja4_ == evilginxJa4)
+| extend Why = strcat(iff(IsEvilginx, "*** Evilginx JA4 *** ; ", ""), "risky Entra sign-in (", RiskLevel, ") for ", UPN, " + ", iff(nonBrowser, "non-browser", "rare"), " JA4 on their device within 30m; app=", AppDisplayName, "; sign-in from ", Location)
+| project Verdict = iff(IsEvilginx, "CRITICAL - Evilginx + risky sign-in", "HIGH - AiTM session-theft pattern"),
+          UPN, DeviceName, RiskLevel, RiskState, ja4_, ja4s_, bsec, Rarity = round(R, 2), nonBrowser,
+          SignInIP, Location, AppDisplayName, SNI = sni, SignInTime, ConnTime, TimeGapMin, Why
+| sort by Verdict asc, TimeGapMin asc

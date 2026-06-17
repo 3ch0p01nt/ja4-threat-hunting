@@ -1,0 +1,62 @@
+// ============================================================================
+// wb_cloudexfil - CLOUD EXFIL CORROBORATION  (Microsoft Sentinel)
+// ----------------------------------------------------------------------------
+// Correlates a RARE JA4 outbound callout with an upload/download/export-class
+// Defender-for-Cloud-Apps event from the SAME DEVICE (egress PublicIP match)
+// within +/-1 h. IsAnonymousProxy rows are always included (highest-risk vector).
+// Perf: sslPub NOT materialized; small results materialized. Sparse data -> may
+// return 0 rows cleanly; defends the IL5 deployment where MDCA data is richer.
+// ============================================================================
+let lookback     = 30d;
+let minRarity    = 0.7;
+let exfil_window = 1h;
+let exfilActivityTypes = dynamic(["Upload","Download","Export","Share","Sync","FileUpload","FileDownload","FileOperation"]);
+let sslPub =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false
+    | extend bsec = substring(ja4_, 11, 12), cipherCnt = toint(substring(ja4_, 4, 2))
+    | project ConnTime = TimeGenerated, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt;
+let pairAgg    = materialize(sslPub | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_);
+let totalConns = toscalar(pairAgg | summarize sum(Conns));
+let totalDevs  = toscalar(sslPub  | summarize dcount(DeviceId, 4));
+let rareSet = materialize(
+    pairAgg
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R);
+let rareSsl = materialize(sslPub | join kind=inner rareSet on ja4_ | project ConnTime, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R);
+let cloudExfil = materialize(
+    CloudAppEvents
+    | where TimeGenerated > ago(lookback)
+    | where ActivityType in~ (exfilActivityTypes) or ActionType matches regex @"(?i)(upload|download|export|filesync|fileshare|filemov|filecop)" or IsAnonymousProxy == true
+    | where IsAnonymousProxy == true or not(Application has_any (dynamic(["OneDrive","SharePoint","Microsoft Teams","Microsoft 365","Office 365","Exchange","Yammer","Skype","Microsoft Forms","Microsoft Stream"])))
+    | project ExfilTime = TimeGenerated, Application, ActivityType, ActionType, AccountDisplayName, AccountObjectId = tostring(AccountObjectId), IPAddress = tostring(IPAddress), ObjectName, IsAnonymousProxy, CountryCode);
+let devicePublicIP = materialize(
+    DeviceInfo
+    | where TimeGenerated > ago(lookback) and isnotempty(PublicIP) and isnotempty(DeviceId)
+    | summarize arg_max(TimeGenerated, PublicIP) by DeviceId
+    | project DeviceId, PublicIP);
+let deviceToUpn = materialize(
+    DeviceLogonEvents
+    | where TimeGenerated > ago(lookback) and isnotempty(AccountName) and isnotempty(DeviceId)
+    | summarize UPN = take_any(tolower(AccountName)) by DeviceId);
+rareSsl
+| join kind=inner (devicePublicIP | project DeviceId, PublicIP) on DeviceId
+| join kind=inner cloudExfil on $left.PublicIP == $right.IPAddress
+| where abs(ExfilTime - ConnTime) <= exfil_window
+| join kind=leftouter (deviceToUpn | project DeviceId, UPN) on DeviceId
+| extend TimeGapMin = round(datetime_diff('second', ExfilTime, ConnTime) / 60.0, 1)
+| extend Why = strcat("Rare JA4 + cloud exfil from same device (PublicIP match) +/-1h",
+    iff(IsAnonymousProxy, "; *** ANONYMOUS PROXY ***", ""), "; app=", Application,
+    "; activity=", coalesce(ActivityType, ActionType), "; object=", coalesce(ObjectName, ""),
+    "; bsec=", bsec, " ciphers=", tostring(cipherCnt))
+| project Application, ActivityType, ActionType, ObjectName, AccountDisplayName, UserPrincipalName = coalesce(UPN, ""),
+          DeviceName, ja4_, ja4s_, bsec, cipherCnt, Rarity = round(R, 2), PublicIP, RemoteIP, SNI = sni,
+          IsAnonymousProxy, CountryCode, ConnTime, ExfilTime, TimeGapMin, Why
+| sort by IsAnonymousProxy desc, TimeGapMin asc, ExfilTime desc

@@ -1,0 +1,48 @@
+// ============================================================================
+// wb_impossible - STRUCTURALLY-IMPOSSIBLE / SYNTHETIC JA4 (scanner / tool tells)
+//     Platform: Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// Flags JA4s that are structurally inconsistent or tool-like:
+//   (a) legacy TLS (1.0/1.1) WITH an ALPN present - ALPN didn't exist then = synthetic
+//   (b) legacy TLS with a catch-all (>60) cipher list = mass-scanner
+//   (c) zero TLS extensions to a public dest = primitive/hand-rolled client
+//   (d) QUIC on a non-standard port
+//   (e) the FoxIO/GreyNoise documented mass-scanner prefix t11d6911h9
+// Source: FoxIO JA4T blog ("TLS 1.1 with ALPN is a structural impossibility").
+// ============================================================================
+let lookback = 30d;
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)
+    | where isnotempty(ja4_) and strlen(ja4_) >= 10
+    | extend proto = substring(ja4_, 0, 1), tlsVer = substring(ja4_, 1, 2), alpn = substring(ja4_, 8, 2),
+             cipherCnt = toint(substring(ja4_, 4, 2)), extCnt = toint(substring(ja4_, 6, 2))
+    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | extend r_tls11alpn = (tlsVer in ("10","11") and alpn != "00"),
+             r_legacyManyCiph = (tlsVer in ("10","11") and cipherCnt > 60),
+             r_noExtPub = (extCnt == 0 and isPublic),
+             r_quicNonStd = (proto == "q" and RemotePort != 443 and RemotePort != 80),
+             r_scanner = (ja4_ startswith "t11d6911h9")
+    | where r_tls11alpn or r_legacyManyCiph or r_noExtPub or r_quicNonStd or r_scanner
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, sni, isPublic, r_tls11alpn, r_legacyManyCiph, r_noExtPub, r_quicNonStd, r_scanner;
+let procs =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+    | summarize Proc = take_any(tolower(InitiatingProcessFileName)) by DeviceId, RemoteIP, RemotePort;
+ssl
+| join hint.shufflekey=DeviceId kind=leftouter procs on DeviceId, RemoteIP, RemotePort
+| extend Reason = strcat(
+    iff(r_tls11alpn, "legacy-TLS with ALPN (impossible); ", ""),
+    iff(r_legacyManyCiph, "legacy-TLS catch-all cipher list (scanner); ", ""),
+    iff(r_noExtPub, "zero TLS extensions to public; ", ""),
+    iff(r_quicNonStd, "QUIC on non-standard port; ", ""),
+    iff(r_scanner, "known mass-scanner prefix; ", ""))
+| summarize Connections = count(), Devices = dcount(DeviceId, 4), SampleDevices = make_set(DeviceName, 5),
+            SampleProcs = make_set(Proc, 5), SampleDests = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+            AnyPublic = max(isPublic), Reason = take_any(Reason), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by ja4_
+| project ja4_, Reason, Devices, Connections, AnyPublic, SampleProcs, SampleDevices, SampleDests, FirstSeen, LastSeen
+| sort by Connections desc

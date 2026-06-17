@@ -1,0 +1,147 @@
+// ============================================================================
+// wb_detonation - DETONATION CORROBORATION  (E5 / Defender XDR-native)
+//                Platform: Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// Raises INCIDENT-GRADE signal when a device shows BOTH:
+//   (a) a RARE JA4 TLS callout to a public, non-Microsoft destination, AND
+//   (b) an endpoint detonation signal within ±detWindow on the same device:
+//         • ASR rule fire  (DeviceEvents ActionType startswith "Asr"), OR
+//         • Defender alert (AlertEvidence DeviceId hit)
+// Neither signal alone is dispositive; the conjunction is high-confidence.
+// IncidentScore = round(Rarity × 100) + ASR bonus (+20) + alert-severity
+//   weight (High=+30, Medium=+20, Low=+10). Practical range 0-150.
+// NOTE: ASR ActionType strings ("AsrOfficeChildProcess", "AsrObfuscatedScript",
+//   "AsrPsexecAndWmiChildProcess", etc.) vary by engine build; "startswith Asr"
+//   catches all variants. In audit-heavy tenants, append:
+//     and ActionType endswith "Block"
+//   to reduce noise from audit-mode ASR fires.
+// PERF: agg/rare are small aggregates (materialize). sslRare is a per-connection
+//   table expression; rare JA4s have few connections by definition, bounding the
+//   Cartesian product with infrequent detonation signals before the time filter.
+//   Both corroboration paths share the same rarity computation with no extra scan.
+// Sources: FoxIO JA4 spec; MITRE T1071.001, T1203, T1059; Pyramid of Pain.
+// ============================================================================
+let lookback  = 30d;
+let minRarity = 0.7;
+let detWindow = 30m;   // max temporal gap: rare TLS callout ↔ detonation signal
+let msSni = dynamic([".microsoft.com",".windows.com",".windowsupdate.com",".office.com",
+                     ".office365.com",".sharepoint.com",".onedrive.com",".microsoftonline.com",
+                     ".azure.com",".azureedge.net",".msedge.net",".msftconnecttest.com",
+                     ".windows.net",".bing.com",".live.com",".skype.com"]);
+// ── 1. SSL base + rarity gate (standard IDF) ───────────────────────────────────
+let ssl =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF     = todynamic(AdditionalFields)
+    | extend ja4_   = tostring(AF.ja4),    ja4s_   = tostring(AF.ja4s),
+             sni    = tostring(AF.server_name),
+             issuer = tostring(AF.issuer), subject = tostring(AF.subject)
+    | where isnotempty(ja4_)
+    | where (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
+    | where not(isnotempty(sni) and sni has_any(msSni))
+    | extend selfSig = (isnotempty(issuer) and issuer == subject)
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP,
+              ja4_, ja4s_, sni, issuer, selfSig;
+let agg = materialize(
+    ssl
+    | summarize TotalConns      = count(),
+                DistinctDevices = dcount(DeviceId, 4)
+            by ja4_, ja4s_);
+let totalConns   = toscalar(agg | summarize sum(TotalConns));
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));
+let rare = materialize(
+    agg
+    | extend Rhost = iff(totalDevices <= 1, 1.0,
+                 max_of(0.0, log(todouble(totalDevices) / todouble(DistinctDevices))
+                             / log(todouble(totalDevices))))
+    | extend Rconn = iff(totalConns   <= 1, 1.0,
+                 max_of(0.0, log(todouble(totalConns)   / todouble(TotalConns))
+                             / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity);
+// Per-connection rare SSL — individual timestamps are required for ±detWindow.
+// NOT materialized: rare JA4s have few connections by construction, so the
+// Cartesian product with detonation signals stays small after the time filter.
+let sslRare =
+    ssl
+    | join kind=inner (rare | project ja4_, ja4s_, R) on ja4_, ja4s_
+    | project sslTime = TimeGenerated, DeviceId, DeviceName, RemoteIP,
+              ja4_, ja4s_, sni, issuer, selfSig, R;
+// ── 2. Detonation signal A: ASR rule fires ─────────────────────────────────────
+// "startswith Asr" is the stable prefix across all engine builds and rule names.
+let asrEvents =
+    DeviceEvents
+    | where TimeGenerated > ago(lookback) and ActionType startswith "Asr"
+    | project asrTime   = TimeGenerated,
+              DeviceId,
+              AsrAction = ActionType,
+              AsrProc   = tolower(InitiatingProcessFileName),
+              AsrFile   = FileName;
+// ── 3. Detonation signal B: Defender alerts ────────────────────────────────────
+let alertEv =
+    AlertEvidence
+    | where TimeGenerated > ago(lookback) and isnotempty(DeviceId)
+    | project alertTime = TimeGenerated,
+              DeviceId,
+              AlertId,
+              Title,
+              Severity;
+// ── 4a. Corroborate: rare TLS × ASR event (±detWindow on same DeviceId) ─────────
+let byAsr =
+    sslRare
+    | join hint.shufflekey=DeviceId kind=inner asrEvents on DeviceId
+    | where sslTime between (asrTime - detWindow .. asrTime + detWindow)
+    | extend GapMin = round(todouble(datetime_diff('second', sslTime, asrTime)) / 60.0, 1)
+    | summarize
+        CorrobType    = "ASR event",
+        CorrobDetail  = take_any(AsrAction),
+        CorrobContext = take_any(AsrProc),
+        AlertTitle    = "",
+        AlertSeverity = "",
+        sni           = take_any(sni),
+        issuer        = take_any(issuer),
+        selfSig       = max(selfSig),
+        MinAbsGapMin  = min(abs(GapMin)),
+        FirstSslTime  = min(sslTime),
+        Rarity        = round(take_any(R), 2)
+        by DeviceId, DeviceName, ja4_, ja4s_, RemoteIP;
+// ── 4b. Corroborate: rare TLS × Defender alert (±detWindow on same DeviceId) ────
+let byAlert =
+    sslRare
+    | join hint.shufflekey=DeviceId kind=inner alertEv on DeviceId
+    | where sslTime between (alertTime - detWindow .. alertTime + detWindow)
+    | extend GapMin = round(todouble(datetime_diff('second', sslTime, alertTime)) / 60.0, 1)
+    | summarize
+        CorrobType    = "Defender alert",
+        CorrobDetail  = take_any(Title),
+        CorrobContext = "",
+        AlertTitle    = take_any(Title),
+        AlertSeverity = take_any(Severity),
+        sni           = take_any(sni),
+        issuer        = take_any(issuer),
+        selfSig       = max(selfSig),
+        MinAbsGapMin  = min(abs(GapMin)),
+        FirstSslTime  = min(sslTime),
+        Rarity        = round(take_any(R), 2)
+        by DeviceId, DeviceName, ja4_, ja4s_, RemoteIP;
+// ── 5. Union, score, project ────────────────────────────────────────────────────
+union byAsr, byAlert
+| extend SevWeight = case(AlertSeverity == "High",   30,
+                          AlertSeverity == "Medium",  20,
+                          AlertSeverity == "Low",     10, 0)
+| extend IncidentScore = toint(round(100.0 * Rarity))
+                       + iff(CorrobType == "ASR event", 20, 0)
+                       + SevWeight
+| extend Why = strcat(
+    "Rare JA4 (R=", tostring(Rarity), ") → ",
+    coalesce(sni, RemoteIP), " | ",
+    CorrobType, ": '", CorrobDetail, "'",
+    " within ", tostring(MinAbsGapMin), " min",
+    iff(selfSig, " | self-signed cert", ""),
+    iff(isnotempty(AlertSeverity), strcat(" [sev=", AlertSeverity, "]"), ""))
+| project
+    DeviceName, FirstSslTime, ja4_, ja4s_, sni, issuer, RemoteIP, Rarity,
+    CorrobType, CorrobDetail, CorrobContext, AlertTitle, AlertSeverity,
+    MinAbsGapMin, IncidentScore, Why
+| sort by IncidentScore desc, MinAbsGapMin asc

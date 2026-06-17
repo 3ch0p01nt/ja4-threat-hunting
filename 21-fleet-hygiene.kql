@@ -1,0 +1,58 @@
+// ============================================================================
+// wb_hygiene  -  FLEET HYGIENE / CROSS-OS ASSET ANOMALY
+//     Platform: Microsoft Sentinel (Log Analytics)
+// ----------------------------------------------------------------------------
+// (A) OS <-> TLS-LIBRARY contradiction: a JA4 b-section (stable TLS-library id)
+//     that cannot run natively on the device's DeviceInfo.OSPlatform
+//     (Safari/WebKit b on Windows/Linux, or WinINET/WinHTTP b on macOS/Linux) =
+//     WSL/Wine/cross-compiled implant or a uTLS fingerprint spoof.
+// (B) JA4 proliferation: devices whose dcount(ja4_) exceeds 3x the fleet median
+//     (fingerprint-randomising implant or bulk-tool deployment).
+// PERF: one materialized per-(DeviceId, ja4_) aggregate feeds both findings.
+// Sources: FoxIO ja4plus b-section map; uTLS research; GreyNoise cipher-cycling.
+// ============================================================================
+let lookback = 30d;
+let perDJ = materialize(
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
+    | where AdditionalFields has "ja4"
+    | extend AF = todynamic(AdditionalFields)
+    | extend ja4_ = tostring(AF.ja4)
+    | where isnotempty(ja4_) and strlen(ja4_) >= 36
+    | project TimeGenerated, DeviceId, DeviceName, ja4_
+    | summarize DeviceName = take_any(DeviceName), Conns = count(), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+      by DeviceId, ja4_);
+let devInfo = materialize(
+    DeviceInfo
+    | where TimeGenerated > ago(lookback)
+    | summarize arg_max(TimeGenerated, OSPlatform) by DeviceId
+    | project DeviceId, OSPlatform);
+let contradictions =
+    perDJ
+    | where ja4_ contains "a09f3c656075" or ja4_ contains "d83cc789557e" or ja4_ contains "76e208dd3e22"
+    | join kind=inner devInfo on DeviceId
+    | where isnotempty(OSPlatform)
+    | extend libIsSafari = (ja4_ contains "a09f3c656075"), libIsWinINET = (ja4_ contains "d83cc789557e"), libIsWinHTTP = (ja4_ contains "76e208dd3e22")
+    | extend libLabel = case(libIsSafari, "Safari/WebKit (Apple-only, b=a09f3c656075)", libIsWinINET, "WinINET (Windows-only, b=d83cc789557e)", libIsWinHTTP, "WinHTTP (Windows-only, b=76e208dd3e22)", "other")
+    | extend isContradiction = ((libIsSafari and not(OSPlatform in~ ("macOS","iOS"))) or (libIsWinINET and not(OSPlatform startswith "Windows")) or (libIsWinHTTP and not(OSPlatform startswith "Windows")))
+    | where isContradiction
+    | summarize DeviceName = take_any(DeviceName), OSPlatform = take_any(OSPlatform), ContradictingJA4s = make_set(ja4_, 10), DistinctJA4s = dcount(ja4_, 4), ContraLibs = make_set(libLabel, 5), Conns = sum(Conns), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen) by DeviceId
+    | extend Reason = strcat("OSPlatform=", OSPlatform, " emitting library mismatch: ", strcat_array(ContraLibs, "; "), " (", tostring(DistinctJA4s), " contradicting JA4(s)) - WSL/Wine/cross-compiled implant or uTLS fingerprint spoof")
+    | project FindingType = "OS-Fingerprint Contradiction", DeviceId, DeviceName, OSPlatform, DistinctJA4s, SampleJA4s = ContradictingJA4s, Conns, Reason, FirstSeen, LastSeen;
+let perDevice = materialize(
+    perDJ
+    | summarize DeviceName = take_any(DeviceName), DistinctJA4s = dcount(ja4_, 4), SampleJA4s = make_set(ja4_, 10), Conns = sum(Conns), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen) by DeviceId);
+let medianJA4 = coalesce(toscalar(perDevice | summarize percentile(todouble(DistinctJA4s), 50)), 1.0);
+let proliferators =
+    perDevice
+    | where DistinctJA4s > 3 * medianJA4
+    | top 20 by DistinctJA4s desc
+    | join kind=leftouter devInfo on DeviceId
+    | extend OSPlatform = coalesce(OSPlatform, "(unknown)")
+    | extend Reason = strcat("DistinctJA4s=", tostring(DistinctJA4s), " vs fleet median=", tostring(toint(medianJA4)), " (", tostring(toint(todouble(DistinctJA4s) / medianJA4)), "x median) - possible fingerprint-randomising implant or scanning tool deployment")
+    | project FindingType = "JA4 Proliferation", DeviceId, DeviceName, OSPlatform, DistinctJA4s, SampleJA4s, Conns, Reason, FirstSeen, LastSeen;
+union contradictions, proliferators
+| extend FTypeOrder = iff(FindingType == "OS-Fingerprint Contradiction", 1, 2)
+| project FindingType, DeviceName, DeviceId, OSPlatform, DistinctJA4s, SampleJA4s, Conns, Reason, FirstSeen, LastSeen, FTypeOrder
+| sort by FTypeOrder asc, DistinctJA4s desc, Conns desc
+| project-away FTypeOrder
