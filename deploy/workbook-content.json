@@ -68,6 +68,14 @@
       "name": "parameters"
     },
     {
+      "type": 1,
+      "content": {
+        "json": "**How to use this workbook.** Start at **Section 1 - Top Leads**. **Red pills = act now**, amber = review, question/blue = informational. Hover any **Client JA4 / Server JA4S / TLS library** column for a plain-language explanation. Every section has a **Next step** telling a Tier-1 analyst exactly what to do. Toggle **Known-bad lookup = On** (above) to also run exact known-malware fingerprint matches.",
+        "style": "info"
+      },
+      "name": "cmdbar"
+    },
+    {
       "type": 12,
       "conditionalVisibility": {
         "parameterName": "Section",
@@ -2607,7 +2615,8 @@
           {
             "type": 1,
             "content": {
-              "json": "## Known-bad JA4+JA4S lookup (opt-in)\nThis is the **only** component that uses external reference data: FoxIO's **public** ja4plus-mapping (Sliver, IcedID, Cobalt Strike, SoftEther) - a free public reference embedded as a static table, **not** a premium feed. An exact JA4+JA4S pair hit is **CRITICAL** on its own. Set **Known-bad lookup = On** above to run it. Verify hits before acting; fingerprints rotate ~yearly."
+              "json": "**Known-bad JA4+JA4S lookup (opt-in).** This is the **only** component that uses external reference data: FoxIO's **public** ja4plus-mapping (Sliver, IcedID, Cobalt Strike, SoftEther) - a free public reference embedded as a static table, **not** a premium feed. An exact JA4+JA4S pair hit is **CRITICAL** on its own. Set **Known-bad lookup = On** above to run it. Verify hits before acting; fingerprints rotate ~yearly.",
+              "style": "warning"
             },
             "name": "h-kb"
           },

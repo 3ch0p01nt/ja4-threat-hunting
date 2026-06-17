@@ -2,7 +2,7 @@
 // 11 - PROCESS -> JA4 LIBRARY MISMATCH  (E5 / Defender XDR-native)
 //      Platform: Microsoft Defender XDR > Advanced Hunting
 // ----------------------------------------------------------------------------
-// The JA4 b-section (chars 10-21 = sorted-cipher hash) is a version-stable TLS
+// The JA4 b-section (chars 11-22 = sorted-cipher hash) is a version-stable TLS
 // LIBRARY identifier. ConnectionSuccess gives the PROCESS. A contradiction is
 // high-signal: a browser library from a non-browser process (uTLS parroting /
 // injection), a Python/Go library from a LOLBIN or user-path binary, or any TLS
@@ -58,4 +58,5 @@ ssl
 | extend Severity = case(Proc in~ (lolbinProcs) or AnyUserPath, "High", "Medium")
 | project Severity, Mismatch, Proc, bsec, ja4_, Devices, Conns, AnyUserPath, ProcFolders, Dests, FirstSeen, LastSeen
 | sort by Severity asc, Devices asc, Conns asc
+
 

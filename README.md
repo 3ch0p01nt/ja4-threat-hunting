@@ -46,7 +46,7 @@ set **`workspaceResourceId`** to your Log Analytics / Sentinel workspace, then *
 - **Beaconing** = low coefficient-of-variation on inter-arrival times.
 - **First-seen / cipher-cycling** = brand-new JA4 in the estate; one JA4_ac with many cipher variants.
 - **Known-bad (opt-in)** = exact JA4+JA4S match against FoxIO's public ja4plus-mapping (embedded static table, not a premium feed), plus a JA4X-approximation on self-CA cert structure. Toggle **Known-bad lookup = On** in the workbook to enable.
-- **C2 tradecraft** = the JA4 b-section (chars 10-21, sorted-cipher hash) is a stable TLS-**library** identifier; a contradiction with the attributed process (browser library from a non-browser, Python/Go from a LOLBIN, any TLS from a script-host LOLBIN) catches uTLS parroting / injection / loaders. A TLS1.2 + no-ALPN + LOLBIN shape (or the exact Cobalt Strike c-section / server JA4S) catches CS / Meterpreter.
+- **C2 tradecraft** = the JA4 b-section (chars 11-22, sorted-cipher hash) is a stable TLS-**library** identifier; a contradiction with the attributed process (browser library from a non-browser, Python/Go from a LOLBIN, any TLS from a script-host LOLBIN) catches uTLS parroting / injection / loaders. A TLS1.2 + no-ALPN + LOLBIN shape (or the exact Cobalt Strike c-section / server JA4S) catches CS / Meterpreter.
 - **FP suppression** = known-good library+process pairs and Microsoft-issued certs are down-weighted; Microsoft destinations are excluded from the tradecraft detectors.
 
 ## Performance
@@ -67,3 +67,4 @@ It deploys regardless — sections without data simply return no rows.
 MISP decaying models (temporal decay) · Pyramid of Pain (JA4 ranks above IP) · JA4 / JA4+ spec (structure
 decode, JA4_ac) · FoxIO ja4plus-mapping (opt-in known-bad only) · detection-engineering proximity scoring ·
 Recorded Future / STIX confidence bands.
+

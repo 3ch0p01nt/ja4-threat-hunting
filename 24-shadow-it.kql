@@ -2,7 +2,7 @@
 // wb_shadowit.kql - SHADOW-IT / NON-BROWSER SaaS ACCESS  (inventory)
 //                   Microsoft Sentinel (Log Analytics)
 // ----------------------------------------------------------------------------
-// The JA4 b-section (chars 10-21, sorted-cipher hash) is a stable TLS-library
+// The JA4 b-section (chars 11-22, sorted-cipher hash) is a stable TLS-library
 // identifier. When a Python, Go, or UNKNOWN automation-library fingerprint
 // reaches a PUBLIC, non-Microsoft SaaS / API endpoint, it reveals scripts,
 // agents, or unapproved tools communicating with external services — shadow-IT.
@@ -111,4 +111,5 @@ ssl
           Why, FirstSeen, LastSeen, SevOrd
 | sort by SevOrd asc, Devices desc, Conns desc
 | project-away SevOrd
+
 

@@ -1,0 +1,151 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>JA4 Workbook - 10-Cycle Improvement Journey</title>
+<style>
+  :root{ --bg:#0b1220; --panel:#111c2e; --ink:#e6edf6; --mut:#8aa0bd; }
+  *{box-sizing:border-box} body{margin:0;background:linear-gradient(160deg,#0b1220,#0e1830);color:var(--ink);font-family:Segoe UI,Inter,system-ui,Arial,sans-serif}
+  .wrap{max-width:1040px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:26px;margin:0 0 4px} .sub{color:var(--mut);margin:0 0 22px;font-size:14px}
+  .hero{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 26px}
+  .kpi{background:var(--panel);border:1px solid #1d2b3a;border-radius:12px;padding:14px 16px;flex:1;min-width:150px}
+  .kpi .big{font-size:30px;font-weight:700} .kpi .lbl{color:var(--mut);font-size:12px;margin-top:2px}
+  .kpi .arrow{color:#36c2ce;font-size:13px}
+  .panel{background:var(--panel);border:1px solid #1d2b3a;border-radius:14px;padding:18px 18px 8px;margin:0 0 24px}
+  .panel h2{font-size:15px;margin:0 0 6px} .legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--mut);font-size:12px;margin:2px 0 10px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .card{display:flex;gap:14px;background:var(--panel);border:1px solid #1d2b3a;border-left:3px solid #36c2ce;border-radius:10px;padding:12px 14px;margin:0 0 10px}
+  .cnum{font-size:22px;font-weight:800;color:#36c2ce;min-width:30px;text-align:center}
+  .ctheme{font-weight:700;font-size:14px} .cdesc{color:var(--mut);font-size:13px;margin:3px 0 7px}
+  .cmetrics{display:flex;gap:8px;flex-wrap:wrap}
+  .m{font-size:11px;border-radius:20px;padding:2px 9px;border:1px solid #24364a;color:#cdd9ea}
+  .m.t{border-color:#ff5c7a55;color:#ff8ea3} .m.e{border-color:#36c2ce55;color:#7fe1e8} .m.d{border-color:#f5b94a55;color:#ffd285} .m.k{border-color:#2b6cb055;color:#86b6e6}
+  .finds{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
+  .find{background:#15233a;border:1px solid #24364a;border-radius:10px;padding:10px 12px;font-size:13px;flex:1;min-width:200px}
+  .find b{color:#ff8ea3}
+  footer{color:var(--mut);font-size:12px;margin-top:18px}
+</style></head><body><div class='wrap'>
+<h1>JA4 / JA4S Threat-Hunting Workbook</h1>
+<p class='sub'>Ten-cycle improvement journey - from a powerful-but-expert toolkit to a Tier-1-ready hunting workbook. Every cycle was built, validated against the live tenant, and deployed.</p>
+
+<div class='hero'>
+  <div class='kpi'><div class='big'>10</div><div class='lbl'>improvement cycles, all deployed</div></div>
+  <div class='kpi'><div class='big'>2 &rarr; 21</div><div class='lbl'>Tier-1-ready panels <span class='arrow'>+950%</span></div></div>
+  <div class='kpi'><div class='big'>20 &rarr; 35</div><div class='lbl'>plain-language explainer blocks</div></div>
+  <div class='kpi'><div class='big'>24 &rarr; 26</div><div class='lbl'>detection panels (command-center)</div></div>
+  <div class='kpi'><div class='big'>4</div><div class='lbl'>real findings surfaced in-tenant</div></div>
+</div>
+
+<div class='panel'>
+  <h2>The journey, by the numbers</h2>
+  <div class='legend'><span><i style='background:#ff5c7a'></i>Tier-1-ready panels</span><span><i style='background:#36c2ce'></i>Explainer blocks</span><span><i style='background:#f5b94a'></i>Detection panels</span></div>
+  <svg viewBox='0 0 920 380' width='100%'>
+    <line x1="56" y1="334.0" x2="900" y2="334.0" stroke="#1d2b3a"/><text x="48" y="334.0" fill="#5b7088" font-size="11" text-anchor="end" dy="4">0</text><line x1="56" y1="256.5" x2="900" y2="256.5" stroke="#1d2b3a"/><text x="48" y="256.5" fill="#5b7088" font-size="11" text-anchor="end" dy="4">10</text><line x1="56" y1="179.0" x2="900" y2="179.0" stroke="#1d2b3a"/><text x="48" y="179.0" fill="#5b7088" font-size="11" text-anchor="end" dy="4">20</text><line x1="56" y1="101.5" x2="900" y2="101.5" stroke="#1d2b3a"/><text x="48" y="101.5" fill="#5b7088" font-size="11" text-anchor="end" dy="4">30</text><line x1="56" y1="24.0" x2="900" y2="24.0" stroke="#1d2b3a"/><text x="48" y="24.0" fill="#5b7088" font-size="11" text-anchor="end" dy="4">40</text>
+    <polyline fill='none' stroke='#f5b94a' stroke-width='2.5' points='56.0,148.0 140.4,148.0 224.8,148.0 309.2,148.0 393.6,148.0 478.0,148.0 562.4,148.0 646.8,148.0 731.2,132.5 815.6,132.5 900.0,132.5'/><circle cx="56.0" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="140.4" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="224.8" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="309.2" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="393.6" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="478.0" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="562.4" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="646.8" cy="148.0" r="3.5" fill="#f5b94a"/><circle cx="731.2" cy="132.5" r="3.5" fill="#f5b94a"/><circle cx="815.6" cy="132.5" r="3.5" fill="#f5b94a"/><circle cx="900.0" cy="132.5" r="3.5" fill="#f5b94a"/>
+    <polyline fill='none' stroke='#36c2ce' stroke-width='2.5' points='56.0,179.0 140.4,171.2 224.8,124.8 309.2,124.8 393.6,124.8 478.0,101.5 562.4,93.8 646.8,93.8 731.2,78.2 815.6,62.8 900.0,62.8'/><circle cx="56.0" cy="179.0" r="3.5" fill="#36c2ce"/><circle cx="140.4" cy="171.2" r="3.5" fill="#36c2ce"/><circle cx="224.8" cy="124.8" r="3.5" fill="#36c2ce"/><circle cx="309.2" cy="124.8" r="3.5" fill="#36c2ce"/><circle cx="393.6" cy="124.8" r="3.5" fill="#36c2ce"/><circle cx="478.0" cy="101.5" r="3.5" fill="#36c2ce"/><circle cx="562.4" cy="93.8" r="3.5" fill="#36c2ce"/><circle cx="646.8" cy="93.8" r="3.5" fill="#36c2ce"/><circle cx="731.2" cy="78.2" r="3.5" fill="#36c2ce"/><circle cx="815.6" cy="62.8" r="3.5" fill="#36c2ce"/><circle cx="900.0" cy="62.8" r="3.5" fill="#36c2ce"/>
+    <polyline fill='none' stroke='#ff5c7a' stroke-width='2.5' points='56.0,318.5 140.4,295.2 224.8,279.8 309.2,272.0 393.6,248.8 478.0,233.2 562.4,217.8 646.8,210.0 731.2,194.5 815.6,179.0 900.0,171.2'/><circle cx="56.0" cy="318.5" r="3.5" fill="#ff5c7a"/><circle cx="140.4" cy="295.2" r="3.5" fill="#ff5c7a"/><circle cx="224.8" cy="279.8" r="3.5" fill="#ff5c7a"/><circle cx="309.2" cy="272.0" r="3.5" fill="#ff5c7a"/><circle cx="393.6" cy="248.8" r="3.5" fill="#ff5c7a"/><circle cx="478.0" cy="233.2" r="3.5" fill="#ff5c7a"/><circle cx="562.4" cy="217.8" r="3.5" fill="#ff5c7a"/><circle cx="646.8" cy="210.0" r="3.5" fill="#ff5c7a"/><circle cx="731.2" cy="194.5" r="3.5" fill="#ff5c7a"/><circle cx="815.6" cy="179.0" r="3.5" fill="#ff5c7a"/><circle cx="900.0" cy="171.2" r="3.5" fill="#ff5c7a"/>
+    <text x="56.0" y="352" fill="#5b7088" font-size="11" text-anchor="middle">0</text><text x="140.4" y="352" fill="#5b7088" font-size="11" text-anchor="middle">1</text><text x="224.8" y="352" fill="#5b7088" font-size="11" text-anchor="middle">2</text><text x="309.2" y="352" fill="#5b7088" font-size="11" text-anchor="middle">3</text><text x="393.6" y="352" fill="#5b7088" font-size="11" text-anchor="middle">4</text><text x="478.0" y="352" fill="#5b7088" font-size="11" text-anchor="middle">5</text><text x="562.4" y="352" fill="#5b7088" font-size="11" text-anchor="middle">6</text><text x="646.8" y="352" fill="#5b7088" font-size="11" text-anchor="middle">7</text><text x="731.2" y="352" fill="#5b7088" font-size="11" text-anchor="middle">8</text><text x="815.6" y="352" fill="#5b7088" font-size="11" text-anchor="middle">9</text><text x="900.0" y="352" fill="#5b7088" font-size="11" text-anchor="middle">10</text>
+    <text x='460' y='374' fill='#5b7088' font-size='11' text-anchor='middle'>cycle</text>
+  </svg>
+</div>
+
+<div class='panel'>
+  <h2>Workbook richness (KB of embedded, explained content)</h2>
+  <svg viewBox='0 0 920 380' width='100%'>
+    <rect x="43.0" y="145.6" width="26" height="188.4" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="127.4" y="143.2" width="26" height="190.8" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="211.8" y="142.0" width="26" height="192.0" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="296.2" y="142.0" width="26" height="192.0" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="380.6" y="101.5" width="26" height="232.5" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="465.0" y="66.9" width="26" height="267.1" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="549.4" y="65.7" width="26" height="268.3" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="633.8" y="65.7" width="26" height="268.3" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="718.2" y="43.1" width="26" height="290.9" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="802.6" y="41.9" width="26" height="292.1" rx="3" fill="#2b6cb0" opacity="0.55"/><rect x="887.0" y="41.9" width="26" height="292.1" rx="3" fill="#2b6cb0" opacity="0.55"/>
+    <text x="56.0" y="352" fill="#5b7088" font-size="11" text-anchor="middle">0</text><text x="140.4" y="352" fill="#5b7088" font-size="11" text-anchor="middle">1</text><text x="224.8" y="352" fill="#5b7088" font-size="11" text-anchor="middle">2</text><text x="309.2" y="352" fill="#5b7088" font-size="11" text-anchor="middle">3</text><text x="393.6" y="352" fill="#5b7088" font-size="11" text-anchor="middle">4</text><text x="478.0" y="352" fill="#5b7088" font-size="11" text-anchor="middle">5</text><text x="562.4" y="352" fill="#5b7088" font-size="11" text-anchor="middle">6</text><text x="646.8" y="352" fill="#5b7088" font-size="11" text-anchor="middle">7</text><text x="731.2" y="352" fill="#5b7088" font-size="11" text-anchor="middle">8</text><text x="815.6" y="352" fill="#5b7088" font-size="11" text-anchor="middle">9</text><text x="900.0" y="352" fill="#5b7088" font-size="11" text-anchor="middle">10</text>
+  </svg>
+</div>
+
+<div class='panel'>
+  <h2>What each cycle delivered</h2>
+  <div class='card'>
+  <div class='cnum'>0</div>
+  <div class='cbody'>
+    <div class='ctheme'>Baseline</div>
+    <div class='cdesc'>Full toolkit after agent-built fusions integrated (25 queries, 14 sections).</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 2</span><span class='m e'>Explainers 20</span><span class='m d'>Detections 24</span><span class='m k'>158 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>1</div>
+  <div class='cbody'>
+    <div class='ctheme'>Tier-1 onboarding</div>
+    <div class='cdesc'>Rewrote the intro into a Tier-1 guide: plain-language "what is JA4", a 5-step triage workflow, a verdict/colour legend and a section quick-reference.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 5</span><span class='m e'>Explainers 21</span><span class='m d'>Detections 24</span><span class='m k'>160 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>2</div>
+  <div class='cbody'>
+    <div class='ctheme'>Per-section Next-step</div>
+    <div class='cdesc'>Added a per-section "Next step" action telling a Tier-1 analyst exactly what to do with a hit.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 7</span><span class='m e'>Explainers 27</span><span class='m d'>Detections 24</span><span class='m k'>161 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>3</div>
+  <div class='cbody'>
+    <div class='ctheme'>Navigation reorder</div>
+    <div class='cdesc'>Reordered the section selector into a numbered 1-10 Tier-1 path; pushed reference views to the end.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 8</span><span class='m e'>Explainers 27</span><span class='m d'>Detections 24</span><span class='m k'>161 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>4</div>
+  <div class='cbody'>
+    <div class='ctheme'>Verdict color pills</div>
+    <div class='cdesc'>Threshold-icon red/amber/blue verdict pills across 11 panels - priority visible at a glance.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 11</span><span class='m e'>Explainers 27</span><span class='m d'>Detections 24</span><span class='m k'>195 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>5</div>
+  <div class='cbody'>
+    <div class='ctheme'>Friendly headers + tooltips</div>
+    <div class='cdesc'>Friendly column headers (Client JA4 / Server JA4S / TLS library) with hover tooltips, auto-applied to every grid.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 13</span><span class='m e'>Explainers 30</span><span class='m d'>Detections 24</span><span class='m k'>224 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>6</div>
+  <div class='cbody'>
+    <div class='ctheme'>Top Leads NextStep</div>
+    <div class='cdesc'>Top Leads gained a per-category NextStep column and plain-language column names.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 15</span><span class='m e'>Explainers 31</span><span class='m d'>Detections 24</span><span class='m k'>225 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>7</div>
+  <div class='cbody'>
+    <div class='ctheme'>Overview KPI center</div>
+    <div class='cdesc'>Overview became a KPI command-center: 8 at-a-glance metrics.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 16</span><span class='m e'>Explainers 31</span><span class='m d'>Detections 24</span><span class='m k'>225 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>8</div>
+  <div class='cbody'>
+    <div class='ctheme'>Top Leads command-center</div>
+    <div class='cdesc'>Top Leads command-center: process<->fingerprint contradictions and Cobalt Strike shapes surfaced on the start-here page (WaveBrowser PUP now front and centre).</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 18</span><span class='m e'>Explainers 33</span><span class='m d'>Detections 26</span><span class='m k'>244 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>9</div>
+  <div class='cbody'>
+    <div class='ctheme'>Styled command-bar</div>
+    <div class='cdesc'>Always-visible "How to use" command bar; opt-in Known-bad section restyled as a warning callout.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 20</span><span class='m e'>Explainers 35</span><span class='m d'>Detections 26</span><span class='m k'>245 KB</span></div>
+  </div>
+</div><div class='card'>
+  <div class='cnum'>10</div>
+  <div class='cbody'>
+    <div class='ctheme'>Consistency + story</div>
+    <div class='cdesc'>Consistency pass (b-section wording, project/workbook parity) and this journey infographic.</div>
+    <div class='cmetrics'><span class='m t'>Tier-1 panels 21</span><span class='m e'>Explainers 35</span><span class='m d'>Detections 26</span><span class='m k'>245 KB</span></div>
+  </div>
+</div>
+</div>
+
+<div class='panel'>
+  <h2>Real activity surfaced while building (live tenant)</h2>
+  <div class='finds'>
+    <div class='find'><b>WaveBrowser PUP</b> - the process&harr;fingerprint mismatch caught <code>wavebrowser.exe</code> presenting a Chromium TLS library from a user-path install.</div>
+    <div class='find'><b>ASA self-signed &harr; ClickFix</b> - the detonation engine tied a rare self-CA/no-SNI JA4 to a live 'ClickFix malware prevented' Defender alert.</div>
+    <div class='find'><b>curl no-SNI</b> - the ECH/hidden-SNI panel flagged <code>curl.exe</code> reaching a raw IP with no server name.</div>
+    <div class='find'><b>0 known C2 / 0 legacy-TLS</b> - clean baselines confirmed (no Sliver/Cobalt Strike pairs, no deprecated crypto).</div>
+  </div>
+</div>
+
+<footer>Built and validated against Sentinel-Airs (commercial) and deployable to Azure Government / IL5 via the ARM "Deploy to Azure" button. Repo: 3ch0p01nt/ja4-threat-hunting.</footer>
+</div></body></html>
