@@ -134,6 +134,272 @@
               }
             },
             "name": "q-leads"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### Process vs fingerprint contradictions\nA program whose TLS **library** doesn't match the program itself (a browser fingerprint from a non-browser, or any TLS from a script-host LOLBIN) - uTLS parroting, DLL injection, or PUP/adware. High-signal even when the fingerprint isn't rare."
+            },
+            "name": "h-leads2"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Workbook: Process -> JA4 library MISMATCH. The JA4 b-section (chars 10-21) is a stable TLS-library\r\n// identifier; a contradiction with the attributed process (browser library from a non-browser, Python/Go\r\n// from a LOLBIN, any TLS from a script-host LOLBIN) is high-signal (uTLS parroting / injection / loaders).\r\nlet lookback = {Lookback};\r\nlet chromiumProcs = dynamic([\"chrome.exe\",\"msedge.exe\",\"brave.exe\",\"opera.exe\",\"vivaldi.exe\",\"arc.exe\",\"msedgewebview2.exe\",\"cefsharp.browsersubprocess.exe\",\"teams.exe\",\"ms-teams.exe\",\"slack.exe\",\"code.exe\",\"discord.exe\",\"whatsapp.exe\",\"spotify.exe\",\"signal.exe\",\"notion.exe\",\"postman.exe\",\"1password.exe\"]);\r\nlet firefoxProcs  = dynamic([\"firefox.exe\",\"thunderbird.exe\",\"tor.exe\",\"waterfox.exe\",\"librewolf.exe\"]);\r\nlet lolbinProcs   = dynamic([\"rundll32.exe\",\"regsvr32.exe\",\"mshta.exe\",\"wscript.exe\",\"cscript.exe\",\"cmd.exe\",\"msiexec.exe\",\"hh.exe\"]);\r\nlet chromiumBsec  = dynamic([\"8daaf6152771\",\"55b375c5d22e\"]);\r\nlet firefoxBsec   = \"5b57614c22b0\";\r\nlet pythonBsec    = \"85036bcba153\";\r\nlet goBsec        = dynamic([\"9dc949149365\",\"f57a46bbacb6\"]);\r\nlet msSni = dynamic([\".microsoft.com\",\".windows.com\",\".windowsupdate.com\",\".office.com\",\".office365.com\",\".sharepoint.com\",\".onedrive.com\",\".microsoftonline.com\",\".azure.com\",\".azureedge.net\",\".msedge.net\",\".msftconnecttest.com\",\".windows.net\",\".bing.com\",\".live.com\",\".skype.com\"]);\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name)\r\n    | where strlen(ja4_) >= 22\r\n    | extend bsec = substring(ja4_, 11, 12)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | summarize ja4_ = take_any(ja4_), sni = take_any(sni), DeviceName = take_any(DeviceName), isPublic = max(isPublic),\r\n                Conns = count(), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\r\n            by DeviceId, RemoteIP, RemotePort, bsec;\r\nlet procs =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"ConnectionSuccess\" and isnotempty(InitiatingProcessFileName)\r\n    | summarize Proc = take_any(tolower(InitiatingProcessFileName)), ProcFolder = take_any(InitiatingProcessFolderPath),\r\n                Signer = take_any(InitiatingProcessVersionInfoCompanyName)\r\n            by DeviceId, RemoteIP, RemotePort;\r\nssl\r\n| join hint.shufflekey=DeviceId kind=inner procs on DeviceId, RemoteIP, RemotePort\r\n| extend goExpected = (Signer has \"Google\" or Signer has \"HashiCorp\" or Signer has \"Cloudflare\" or Signer has \"Docker\" or Proc has \"go\" or Proc has \"kubectl\" or Proc has \"node\")\r\n| extend Mismatch = case(\r\n    Proc in~ (lolbinProcs), strcat(\"TLS from LOLBIN script-host '\", Proc, \"'\"),\r\n    (bsec in (chromiumBsec)) and not (Proc in~ (chromiumProcs)), strcat(\"Chromium TLS library from non-browser '\", Proc, \"'\"),\r\n    (bsec == firefoxBsec) and not (Proc in~ (firefoxProcs)), strcat(\"Firefox TLS library from non-Firefox '\", Proc, \"'\"),\r\n    (bsec == pythonBsec) and (Proc !has \"python\"), strcat(\"Python TLS library from '\", Proc, \"'\"),\r\n    (bsec in (goBsec)) and not(goExpected), strcat(\"Go TLS library from unexpected '\", Proc, \"'\"),\r\n    \"\")\r\n| where isnotempty(Mismatch) and isPublic and not(isnotempty(sni) and sni has_any (msSni))\r\n| extend isUserPath = (ProcFolder has \"appdata\" or ProcFolder hasprefix \"c:\\\\users\\\\\" or ProcFolder has \"\\\\temp\\\\\")\r\n| summarize Conns = sum(Conns), Devices = dcount(DeviceId, 4), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 6),\r\n            ProcFolders = make_set(ProcFolder, 4), AnyUserPath = max(isUserPath), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen)\r\n        by Mismatch, Proc, bsec, ja4_\r\n| extend Severity = case(Proc in~ (lolbinProcs) or AnyUserPath, \"High\", \"Medium\")\r\n| project Severity, Mismatch, Proc, bsec, ja4_, Devices, Conns, AnyUserPath, ProcFolders, Dests, FirstSeen, LastSeen\r\n| sort by Severity asc, Devices asc, Conns asc\r\n\r\n",
+              "size": 0,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Severity",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "CRITICAL",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "HIGH",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "PUBLIC",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "MEDIUM",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "REVIEW",
+                          "representation": "question",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "LOW",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Low",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "info",
+                          "text": "{0}"
+                        }
+                      ]
+                    },
+                    "customWidth": "240"
+                  },
+                  {
+                    "columnMatch": "Devices",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Client JA4",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the CLIENT software (the program making the HTTPS connection). You do not need to decode it - the Why/Reasons column explains it."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4s_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Server JA4S",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the SERVER that answered. JA4 + JA4S together identify a specific application or malware family."
+                    }
+                  },
+                  {
+                    "columnMatch": "bsec",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "TLS library",
+                    "tooltipFormat": {
+                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "q-mismatch-leads"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### Cobalt Strike / Meterpreter TLS shape\nTLS 1.2 + no-ALPN from a LOLBIN to a non-Microsoft destination, or an exact Cobalt Strike fingerprint."
+            },
+            "name": "h-leads3"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Workbook: C2 TLS-SHAPE (Cobalt Strike / Meterpreter). Malleable-C2 cannot change the WinINET/WinHTTP\r\n// ClientHello: TLS 1.2 + no-ALPN + a LOLBIN/loader process to a public, non-Microsoft dest. Exact CS tells\r\n// (client c-section 16bbda4055b2 / server JA4S t120300_c030_52d195ce1d92) = CRITICAL on any process.\r\nlet lookback = {Lookback};\r\nlet csJa4s = \"t120300_c030_52d195ce1d92\";\r\nlet csCsec = \"16bbda4055b2\";\r\nlet suspProcs = dynamic([\"rundll32.exe\",\"regsvr32.exe\",\"mshta.exe\",\"wscript.exe\",\"cscript.exe\",\"cmd.exe\",\"msiexec.exe\",\"powershell.exe\",\"pwsh.exe\",\"msbuild.exe\",\"hh.exe\",\"installutil.exe\",\"regsvcs.exe\",\"regasm.exe\"]);\r\nlet msSni = dynamic([\".microsoft.com\",\".windows.com\",\".windowsupdate.com\",\".office.com\",\".office365.com\",\".sharepoint.com\",\".onedrive.com\",\".microsoftonline.com\",\".azure.com\",\".azureedge.net\",\".msedge.net\",\".msftconnecttest.com\",\".windows.net\"]);\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)\r\n    | where strlen(ja4_) >= 36\r\n    | extend tlsVer = substring(ja4_, 1, 2), alpn = substring(ja4_, 8, 2), csec = substring(ja4_, 24, 12)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | where isPublic and ((tlsVer == \"12\" and alpn == \"00\") or ja4s_ == csJa4s or csec == csCsec)\r\n    | summarize Conns = count(), DeviceName = take_any(DeviceName), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\r\n            by DeviceId, RemoteIP, RemotePort, ja4_, ja4s_, tlsVer, alpn, csec, sni;\r\nlet procs =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"ConnectionSuccess\" and isnotempty(InitiatingProcessFileName)\r\n    | summarize Proc = take_any(tolower(InitiatingProcessFileName)), ProcFolder = take_any(InitiatingProcessFolderPath)\r\n            by DeviceId, RemoteIP, RemotePort;\r\nssl\r\n| join hint.shufflekey=DeviceId kind=inner procs on DeviceId, RemoteIP, RemotePort\r\n| extend exactCs   = (ja4s_ == csJa4s or csec == csCsec)\r\n| extend shape     = (tlsVer == \"12\" and alpn == \"00\")\r\n| extend suspProc  = (Proc in~ (suspProcs))\r\n| extend isUserPath = (ProcFolder has \"appdata\" or ProcFolder hasprefix \"c:\\\\users\\\\\" or ProcFolder has \"\\\\temp\\\\\")\r\n| extend isMsDest  = (isnotempty(sni) and sni has_any (msSni))\r\n| where exactCs or (shape and suspProc and not(isMsDest))\r\n| extend Why = strcat(iff(csec == csCsec, \"CS client c-section; \", \"\"), iff(ja4s_ == csJa4s, \"CS server JA4S; \", \"\"),\r\n                      iff(shape, \"TLS1.2+no-ALPN; \", \"\"), iff(suspProc, strcat(\"proc \", Proc, \"; \"), \"\"), iff(isUserPath, \"user/temp path; \", \"\"))\r\n| summarize Conns = sum(Conns), Devices = dcount(DeviceId, 4), Procs = make_set(Proc, 5), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 6),\r\n            AnyExactCs = max(exactCs), AnyUserPath = max(isUserPath), Why = take_any(Why), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen)\r\n        by ja4_, ja4s_\r\n| extend Verdict = iff(AnyExactCs, \"CRITICAL - Cobalt Strike fingerprint\", \"HIGH - C2 TLS shape + suspicious process\")\r\n| project Verdict, ja4_, ja4s_, Why, Procs, Devices, Conns, AnyUserPath, Dests, FirstSeen, LastSeen\r\n| sort by Verdict asc, Devices asc, Conns asc\r\n",
+              "size": 0,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Verdict",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "CRITICAL",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "HIGH",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "PUBLIC",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "MEDIUM",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "REVIEW",
+                          "representation": "question",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "LOW",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Low",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "info",
+                          "text": "{0}"
+                        }
+                      ]
+                    },
+                    "customWidth": "240"
+                  },
+                  {
+                    "columnMatch": "Devices",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Client JA4",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the CLIENT software (the program making the HTTPS connection). You do not need to decode it - the Why/Reasons column explains it."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4s_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Server JA4S",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the SERVER that answered. JA4 + JA4S together identify a specific application or malware family."
+                    }
+                  },
+                  {
+                    "columnMatch": "bsec",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "TLS library",
+                    "tooltipFormat": {
+                      "tooltip": "The cipher-hash part of the JA4 - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "q-c2shape-leads"
           }
         ]
       },
@@ -161,7 +427,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "// Workbook: summary tiles (rare-focused)\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),\r\n             issuer = tostring(AF.issuer), subject = tostring(AF.subject)\r\n    | where isnotempty(ja4_) or isnotempty(ja4s_)\r\n    | extend selfSigned = (isnotempty(issuer) and issuer == subject), noSNI = (substring(ja4_, 3, 1) == \"i\");\r\nlet pairs = materialize(ssl | summarize Conns = count(), Devs = dcount(DeviceId, 4), AnySelf = max(selfSigned), AnyNoSNI = max(noSNI) by ja4_, ja4s_);\r\nlet totalConns   = toscalar(pairs | summarize sum(Conns));\r\nlet totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));\r\nlet scored = pairs\r\n    | extend R = min_of(iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices)))),\r\n                        iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns)))));\r\nunion\r\n (scored | summarize Value = count() | extend Metric = \"JA4 x JA4S pairs (all)\", Sort = 1),\r\n (scored | where R >= minRarity | summarize Value = count() | extend Metric = \"Rare pairs (focus)\", Sort = 2),\r\n (scored | where R >= minRarity and AnySelf | summarize Value = count() | extend Metric = \"Rare + self-signed\", Sort = 3),\r\n (scored | where R >= minRarity and AnyNoSNI | summarize Value = count() | extend Metric = \"Rare + no-SNI\", Sort = 4),\r\n (ssl | summarize Value = dcount(sni, 4) | extend Metric = \"Distinct destinations\", Sort = 5)\r\n| project Metric, Value, Sort\r\n| sort by Sort asc\r\n",
+              "query": "// Workbook: summary KPI tiles (command-center landing)\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),\r\n             issuer = tostring(AF.issuer), subject = tostring(AF.subject)\r\n    | where isnotempty(ja4_) or isnotempty(ja4s_)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | extend selfSigned = (isnotempty(issuer) and issuer == subject), noSNI = (substring(ja4_, 3, 1) == \"i\"),\r\n             legacy = (substring(ja4_, 1, 2) in (\"10\", \"11\", \"s3\", \"s2\"));\r\nlet pairs = materialize(ssl | summarize Conns = count(), Devs = dcount(DeviceId, 4),\r\n             AnySelf = max(toint(selfSigned and isPublic)), AnyNoSNIpub = max(toint(noSNI and isPublic)) by ja4_, ja4s_);\r\nlet totalConns   = toscalar(pairs | summarize sum(Conns));\r\nlet totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));\r\nlet scored = pairs\r\n    | extend R = min_of(iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices)))),\r\n                        iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns)))));\r\nunion\r\n (ssl | summarize Value = dcount(DeviceId, 4) | extend Metric = \"Devices seen\", Sort = 1),\r\n (ssl | summarize Value = dcount(ja4_, 4) | extend Metric = \"Distinct client fingerprints\", Sort = 2),\r\n (scored | summarize Value = count() | extend Metric = \"JA4 x JA4S pairs (all)\", Sort = 3),\r\n (scored | where R >= minRarity | summarize Value = count() | extend Metric = \"Rare pairs (focus)\", Sort = 4),\r\n (scored | where R >= minRarity and AnySelf == 1 | summarize Value = count() | extend Metric = \"Rare + self-signed (public)\", Sort = 5),\r\n (scored | where R >= minRarity and AnyNoSNIpub == 1 | summarize Value = count() | extend Metric = \"Rare + no-SNI (public)\", Sort = 6),\r\n (ssl | where legacy | summarize Value = count() | extend Metric = \"Legacy-TLS connections\", Sort = 7),\r\n (ssl | summarize Value = dcount(sni, 4) | extend Metric = \"Distinct destinations\", Sort = 8)\r\n| project Metric, Value, Sort\r\n| sort by Sort asc\r\n",
               "size": 0,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
