@@ -58,5 +58,6 @@ ssl
 | extend Severity = case(Proc in~ (lolbinProcs) or AnyUserPath, "High", "Medium")
 | project Severity, Mismatch, Proc, bsec, ja4_, Devices, Conns, AnyUserPath, ProcFolders, Dests, FirstSeen, LastSeen
 | sort by Severity asc, Devices asc, Conns asc
+| take 200   // display cap: highest-severity first; detection logic above is uncapped
 
 

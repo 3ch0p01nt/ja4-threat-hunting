@@ -48,3 +48,4 @@ ssl
 | extend Verdict = iff(AnyExactCs, "CRITICAL - Cobalt Strike fingerprint", "HIGH - C2 TLS shape + suspicious process")
 | project Verdict, ja4_, ja4s_, Why, Procs, Devices, Conns, AnyUserPath, Dests, FirstSeen, LastSeen
 | sort by Verdict asc, Devices asc, Conns asc
+| take 200   // display cap: highest-severity first; detection logic above is uncapped
