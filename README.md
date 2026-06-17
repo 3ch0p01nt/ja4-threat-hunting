@@ -22,6 +22,7 @@ set **`workspaceResourceId`** to your Log Analytics / Sentinel workspace, then *
 | File | What it does |
 |---|---|
 | `07-ja4-threat-hunting-workbook.json` | The full interactive workbook (deployed by the buttons above). |
+| `08-improvement-journey-workbook.json` | Companion **native workbook** telling the 10-cycle improvement story (datatable-driven line/bar charts + a cycle grid). |
 | `00-discovery-additionalfields-keys.kql` | Confirm the JA4 keys in `AdditionalFields`. |
 | `01` / `03` | Signature-centric **incident-match fidelity** (Defender XDR / Sentinel). |
 | `02` / `04` | Incident-centric per-pair fidelity. |

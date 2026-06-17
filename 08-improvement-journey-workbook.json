@@ -1,0 +1,119 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# JA4 / JA4S Threat-Hunting Workbook - Improvement Journey\r\n\r\nThis workbook tells the story of a **10-cycle improvement effort** that turned a powerful-but-expert JA4 hunting toolkit into a **Tier-1-ready** workbook. Every cycle was built, validated against the live tenant, and deployed.\r\n\r\n**At a glance:** 10 cycles | Tier-1-ready panels **2 -> 21** | plain-language explainer blocks **20 -> 35** | detection panels **24 -> 26** | embedded explained content **158 -> 245 KB**."
+      },
+      "name": "intro"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## The journey, by the numbers\nTier-1 readiness, plain-language explainers and detection coverage rising across the 10 cycles."
+      },
+      "name": "h-lines"
+    },
+    {
+      "type": 3,
+      "name": "c-lines",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "datatable(Cycle:int, Tier1_ready_panels:int, Explainer_blocks:int, Detection_panels:int) [\r\n  0,2,20,24, 1,5,21,24, 2,7,27,24, 3,8,27,24, 4,11,27,24, 5,13,30,24,\r\n  6,15,31,24, 7,16,31,24, 8,18,33,26, 9,20,35,26, 10,21,35,26\r\n]\r\n| sort by Cycle asc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "linechart",
+        "chartSettings": {
+          "xAxis": "Cycle",
+          "yAxis": [
+            "Tier1_ready_panels",
+            "Explainer_blocks",
+            "Detection_panels"
+          ],
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Workbook richness\nKB of embedded, explained content (text + scored KQL) per cycle."
+      },
+      "name": "h-bars"
+    },
+    {
+      "type": 3,
+      "name": "c-bars",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "datatable(Cycle:int, Workbook_KB:int) [\r\n  0,158, 1,160, 2,161, 3,161, 4,195, 5,224, 6,225, 7,225, 8,244, 9,245, 10,245\r\n]\r\n| sort by Cycle asc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart",
+        "chartSettings": {
+          "xAxis": "Cycle",
+          "yAxis": [
+            "Workbook_KB"
+          ],
+          "showLegend": false
+        }
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## What each cycle delivered"
+      },
+      "name": "h-grid"
+    },
+    {
+      "type": 3,
+      "name": "g-cycles",
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "datatable(Cycle:int, Theme:string, What_changed:string, Tier1_panels:int, Explainers:int, Detections:int) [\r\n  0,\"Baseline\",\"Agent-built fusion detections integrated (25 queries, 14 sections)\",2,20,24,\r\n  1,\"Tier-1 onboarding\",\"Intro rewritten: plain-language what-is-JA4, a 5-step triage workflow, a verdict/colour legend, a section quick-reference\",5,21,24,\r\n  2,\"Per-section Next-step\",\"Added a Tier-1 'Next step' action telling the analyst exactly what to do with a hit\",7,27,24,\r\n  3,\"Navigation reorder\",\"Numbered 1-10 Tier-1 path; reference views moved to the end\",8,27,24,\r\n  4,\"Verdict color pills\",\"Threshold-icon red/amber/blue pills on verdict columns across 11 panels\",11,27,24,\r\n  5,\"Friendly headers + tooltips\",\"Friendly column headers + hover tooltips on every cryptic column, auto-applied to every grid\",13,30,24,\r\n  6,\"Top Leads Next-step\",\"Per-category Next-step column on the start-here queue; plain-language column names\",15,31,24,\r\n  7,\"Overview KPI center\",\"Summary became an 8-metric at-a-glance command-center\",16,31,24,\r\n  8,\"Top Leads command-center\",\"Process<->fingerprint contradictions + Cobalt Strike shapes surfaced on the start-here page (WaveBrowser PUP front and centre)\",18,33,26,\r\n  9,\"Styled command-bar\",\"Always-visible 'How to use' command bar; opt-in Known-bad as a warning callout\",20,35,26,\r\n  10,\"Consistency + this story\",\"Consistency pass + this native journey workbook\",21,35,26\r\n]\r\n| sort by Cycle asc",
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "table",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "Tier1_panels",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "green"
+              }
+            },
+            {
+              "columnMatch": "Explainers",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "blue"
+              }
+            },
+            {
+              "columnMatch": "Detections",
+              "formatter": 8,
+              "formatOptions": {
+                "palette": "red"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Real activity surfaced while building (live tenant)\r\n- **WaveBrowser PUP** - the process vs fingerprint mismatch caught `wavebrowser.exe` presenting a Chromium TLS library from a user-path install.\r\n- **ASA self-signed <-> ClickFix** - the detonation engine tied a rare self-CA / no-SNI JA4 to a live \"ClickFix malware prevented\" Defender alert.\r\n- **curl no-SNI** - the ECH / hidden-SNI panel flagged `curl.exe` reaching a raw IP with no server name.\r\n- **Clean baselines** - 0 known C2 fingerprint pairs and 0 deprecated-TLS connections confirmed.\r\n\r\n_Built and validated against Sentinel-Airs; deployable to Azure Government / IL5 via the ARM \"Deploy to Azure\" button. Repo: 3ch0p01nt/ja4-threat-hunting._"
+      },
+      "name": "findings"
+    }
+  ],
+  "styleSettings": {},
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
