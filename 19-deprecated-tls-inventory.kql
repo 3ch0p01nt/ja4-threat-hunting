@@ -9,7 +9,7 @@
 // PUBLIC legacy-TLS as the higher concern. Source: JA4 spec (version encoding).
 // ============================================================================
 let lookback = 30d;
-let ssl =
+let ssl = materialize(
     DeviceNetworkEvents
     | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
     | where AdditionalFields has "ja4"
@@ -19,10 +19,12 @@ let ssl =
     | extend tlsVer = substring(ja4_, 1, 2)
     | where tlsVer in ("10", "11", "s3", "s2")
     | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
-    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, tlsVer, sni, isPublic;
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, tlsVer, sni, isPublic);
+let legDevices = toscalar(ssl | summarize make_set(DeviceId, 5000));   // attribute only the (few) legacy-TLS devices
 let procs =
     DeviceNetworkEvents
     | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+    | where DeviceId in (legDevices)
     | summarize Proc = take_any(tolower(InitiatingProcessFileName)) by DeviceId, RemoteIP, RemotePort;
 ssl
 | join hint.shufflekey=DeviceId kind=leftouter procs on DeviceId, RemoteIP, RemotePort

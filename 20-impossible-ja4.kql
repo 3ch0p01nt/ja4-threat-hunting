@@ -11,7 +11,7 @@
 // Source: FoxIO JA4T blog ("TLS 1.1 with ALPN is a structural impossibility").
 // ============================================================================
 let lookback = 30d;
-let ssl =
+let ssl = materialize(
     DeviceNetworkEvents
     | where TimeGenerated > ago(lookback) and ActionType == "SslConnectionInspected"
     | where AdditionalFields has "ja4"
@@ -27,10 +27,12 @@ let ssl =
              r_quicNonStd = (proto == "q" and RemotePort != 443 and RemotePort != 80),
              r_scanner = (ja4_ startswith "t11d6911h9")
     | where r_tls11alpn or r_legacyManyCiph or r_noExtPub or r_quicNonStd or r_scanner
-    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, sni, isPublic, r_tls11alpn, r_legacyManyCiph, r_noExtPub, r_quicNonStd, r_scanner;
+    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, sni, isPublic, r_tls11alpn, r_legacyManyCiph, r_noExtPub, r_quicNonStd, r_scanner);
+let susDevices = toscalar(ssl | summarize make_set(DeviceId, 5000));   // attribute only the (few) flagged devices
 let procs =
     DeviceNetworkEvents
     | where TimeGenerated > ago(lookback) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+    | where DeviceId in (susDevices)
     | summarize Proc = take_any(tolower(InitiatingProcessFileName)) by DeviceId, RemoteIP, RemotePort;
 ssl
 | join hint.shufflekey=DeviceId kind=leftouter procs on DeviceId, RemoteIP, RemotePort
