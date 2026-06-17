@@ -4,7 +4,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# JA4 / JA4S Threat-Hunting Workbook\r\n\r\nSurfaces the most interesting TLS-fingerprint activity in this workspace and explains **why** each item is interesting. Runs on Defender data streamed here (`DeviceNetworkEvents` SslConnectionInspected, `SecurityIncident`/`SecurityAlert`, `ConnectionSuccess` process data).\r\n\r\n**How items are scored**\r\n- **Rarity** = combined: rare only if on **few hosts AND few connections**. The **Min rarity** selector focuses every section on the rare tail.\r\n- **Incident-match fidelity** = proximity (flow-exact > host+time > host-any > shared-IP) x temporal decay x rarity x incident severity.\r\n- **Malice signals** = JA4 structure (no-SNI / no-ALPN / legacy TLS / no-extensions / abnormal cipher count), process attribution (LOLBIN / user-path), cert anomalies (self-signed / self-CA / IP-SNI). An age discount demotes aged, widespread fingerprints.\r\n- **Beaconing** = low-jitter periodic call-homes. **First-seen** = brand-new JA4 in the estate. **Cipher-cycling** = one JA4_ac with many cipher variants (evasion).\r\n\r\nPick a **Lookback** and **Min rarity** below, then choose a **Section**. Only the selected section runs (faster). Start at **Top Leads**."
+        "json": "# JA4 / JA4S Threat-Hunting Workbook\r\n\r\n**What this is.** Every HTTPS connection carries a **JA4** fingerprint of the *software* that made it (the browser, app, script, or malware) and a **JA4S** fingerprint of the *server* that answered. Malware and hacking tools have distinctive fingerprints, and unusual fingerprints stand out. This workbook surfaces the most interesting TLS fingerprints in your estate and **explains why each one matters** so you can act without being a JA4 expert.\r\n\r\n## How to triage (start here)\r\n1. Open **Section = Top Leads** (the cross-engine priority queue). Work the **red / highest-Score** rows first.\r\n2. Read the **Why / Reasons** column - it states in plain language why the row is interesting.\r\n3. Confirm the **process** and **destination** (what program is talking, and to where). A trusted program to a trusted site is usually benign; an unknown/LOLBIN program to a raw IP or odd domain is not.\r\n4. If it looks malicious: isolate the device in Defender, raise/update the incident, and pivot using the device + IP shown.\r\n5. Then sweep the other sections for corroboration (a device that appears in **multiple** sections is high-confidence).\r\n\r\n## Reading the results\r\n- **Verdict / Severity**: **Critical** > **High** > **Medium** > **Low**. Critical = act now; Low = review when capacity allows.\r\n- **Red heatmap** columns (Score / SuspicionScore / MatchFidelity / BeaconScore / Devices): **darker red = more urgent**.\r\n- **Green heatmap** (Rarity): **darker green = rarer** (1.0 = a near-unique fingerprint; rare is more interesting).\r\n- **JA4 / JA4S** are the raw fingerprints (`t13d...` / `t12...`); you do not need to decode them - the **Why** column already has.\r\n\r\n## Sections at a glance\r\n- **Top Leads** - the single ranked queue across all engines. *Start here.*\r\n- **Suspicious triage** - every rare fingerprint scored for maliciousness (process / cert / structure).\r\n- **Incident match** - fingerprints tied to your existing incidents, by closeness.\r\n- **Beaconing** - regular low-jitter call-homes (classic C2 shape).\r\n- **New & cipher-cycling** - brand-new fingerprints and cipher-rotating evasion.\r\n- **C2 tradecraft** - process<->fingerprint contradictions and Cobalt Strike / Meterpreter shapes.\r\n- **Endpoint corroboration** - rare JA4 fused with downloads, ASR/alerts, and process lineage.\r\n- **Identity & cloud** - rare JA4 fused with risky sign-ins, cloud exfil, and phishing.\r\n- **Destination anomalies** - trusted-site abuse, hidden-SNI/ECH, and shadow-IT.\r\n- **Inventory & hygiene** - deprecated TLS, impossible fingerprints, cross-OS anomalies.\r\n- **Process baseline** - the known-good (process -> fingerprint) catalog (reference).\r\n- **Known-bad (opt-in)** - exact known-malware fingerprint matches (toggle on).\r\n\r\nPick a **Lookback** and **Min rarity** below, then a **Section** (only the selected one runs, so it stays fast). Core detections use Microsoft E5 / Defender-native data only - no external feeds (the opt-in Known-bad section uses public FoxIO reference data)."
       },
       "name": "intro"
     },
@@ -46,7 +46,7 @@
             "typeSettings": {
               "additionalResourceOptions": []
             },
-            "jsonData": "[{\"value\":\"leads\",\"label\":\"Top Leads\",\"selected\":true},{\"value\":\"overview\",\"label\":\"Overview\"},{\"value\":\"triage\",\"label\":\"Suspicious triage\"},{\"value\":\"incidents\",\"label\":\"Incident match\"},{\"value\":\"beacon\",\"label\":\"Beaconing\"},{\"value\":\"new\",\"label\":\"New & cipher-cycling\"},{\"value\":\"tradecraft\",\"label\":\"C2 tradecraft\"},{\"value\":\"endpoint\",\"label\":\"Endpoint corroboration\"},{\"value\":\"identity\",\"label\":\"Identity & cloud\"},{\"value\":\"destanom\",\"label\":\"Destination anomalies\"},{\"value\":\"inventory\",\"label\":\"Inventory & hygiene\"},{\"value\":\"baseline\",\"label\":\"Process baseline\"},{\"value\":\"landscape\",\"label\":\"Rarity landscape\"},{\"value\":\"knownbad\",\"label\":\"Known-bad (opt-in)\"}]",
+            "jsonData": "[{\"value\":\"leads\",\"label\":\"1. Top Leads (start here)\",\"selected\":true},{\"value\":\"triage\",\"label\":\"2. Suspicious triage\"},{\"value\":\"tradecraft\",\"label\":\"3. C2 tradecraft\"},{\"value\":\"endpoint\",\"label\":\"4. Endpoint corroboration\"},{\"value\":\"identity\",\"label\":\"5. Identity & cloud\"},{\"value\":\"beacon\",\"label\":\"6. Beaconing\"},{\"value\":\"incidents\",\"label\":\"7. Incident match\"},{\"value\":\"new\",\"label\":\"8. New & cipher-cycling\"},{\"value\":\"destanom\",\"label\":\"9. Destination anomalies\"},{\"value\":\"knownbad\",\"label\":\"10. Known-bad (opt-in)\"},{\"value\":\"overview\",\"label\":\"Summary (reference)\"},{\"value\":\"inventory\",\"label\":\"Inventory & hygiene (reference)\"},{\"value\":\"baseline\",\"label\":\"Process baseline (reference)\"},{\"value\":\"landscape\",\"label\":\"Rarity landscape (reference)\"}]",
             "value": "leads"
           },
           {
@@ -81,7 +81,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## Top Prioritized Leads - what's interesting and why\nThe highest-signal items across all engines, ranked. **Why** explains each: a suspicious fingerprint, a fingerprint tied to an incident's device/IP, or a periodic call-home. Work the top (red) rows first."
+              "json": "## Top Prioritized Leads - what's interesting and why\nThe highest-signal items across all engines, ranked. **Why** explains each: a suspicious fingerprint, a fingerprint tied to an incident's device/IP, or a periodic call-home. Work the top (red) rows first.\n\n**Next step:** for each red row, read **Why**, confirm the **process + destination**, pivot to the device timeline in Defender; isolate the device and raise an incident if it looks malicious."
             },
             "name": "h-leads"
           },
@@ -175,7 +175,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## Suspicious rare JA4 - triage\nEvery rare JA4 x JA4S pair scored for maliciousness. **Verdict / Reasons** say *why* (LOLBIN process, self-signed/self-CA cert, no-SNI, no-extensions, abnormal cipher count...). **Procs** is the process behind the fingerprint (recovered via ConnectionSuccess). Verdict tops out at **Critical**."
+              "json": "## Suspicious rare JA4 - triage\nEvery rare JA4 x JA4S pair scored for maliciousness. **Verdict / Reasons** say *why* (LOLBIN process, self-signed/self-CA cert, no-SNI, no-extensions, abnormal cipher count...). **Procs** is the process behind the fingerprint (recovered via ConnectionSuccess). Verdict tops out at **Critical**.\n\n**Next step:** work **Critical/High** first; verify the **Procs** value is a program you expect on that host, check the **SampleSNIs/Issuers** destination, then review the device timeline. Unknown process + self-signed cert to a public IP = escalate."
             },
             "name": "h-tri"
           },
@@ -227,7 +227,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## Incident-match fidelity\nWhich rare fingerprints are tied to your incidents and how tightly. **MatchTier** = flow-exact > host+time > host-any > shared-IP; **MatchFidelity** decays by time-gap and is weighted by rarity and incident severity. **DrivingIncident** is the incident it matched."
+              "json": "## Incident-match fidelity\nWhich rare fingerprints are tied to your incidents and how tightly. **MatchTier** = flow-exact > host+time > host-any > shared-IP; **MatchFidelity** decays by time-gap and is weighted by rarity and incident severity. **DrivingIncident** is the incident it matched.\n\n**Next step:** open the **DrivingIncident**; the fingerprint is extra evidence for that case. A **flow-exact** match at high fidelity means this exact TLS flow is part of the incident - add it to the investigation and sweep other hosts for the same JA4."
             },
             "name": "h-inc"
           },
@@ -279,7 +279,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## Beaconing call-homes\nRegular, low-jitter TLS to one destination = classic C2 shape. A **rare** JA4 to a **no-SNI / raw-IP** destination with low **JitterCV** is the top lead. Benign telemetry (Microsoft, AV, browsers) also beacons - triage by **Dest**."
+              "json": "## Beaconing call-homes\nRegular, low-jitter TLS to one destination = classic C2 shape. A **rare** JA4 to a **no-SNI / raw-IP** destination with low **JitterCV** is the top lead. Benign telemetry (Microsoft, AV, browsers) also beacons - triage by **Dest**.\n\n**Next step:** judge the **Dest** - a known vendor/update domain is usually benign; a raw IP or unknown domain with a tight interval (low **JitterCV**, high **BeaconScore**) is C2-shaped. Confirm the process, then check DNS and the device timeline."
             },
             "name": "h-bea"
           },
@@ -331,7 +331,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## New & cipher-cycling fingerprints\n**First-seen**: a JA4 absent from the baseline that just appeared - especially one **spreading to multiple hosts** - is a strong new-implant signal. **Cipher-cycling**: many full-JA4 variants sharing one **JA4_ac** = a tool rotating ciphers to evade hashing (GreyNoise pattern)."
+              "json": "## New & cipher-cycling fingerprints\n**First-seen**: a JA4 absent from the baseline that just appeared - especially one **spreading to multiple hosts** - is a strong new-implant signal. **Cipher-cycling**: many full-JA4 variants sharing one **JA4_ac** = a tool rotating ciphers to evade hashing (GreyNoise pattern).\n\n**Next step:** prioritize rows with **Spread = spreading (multi-host)** - a brand-new fingerprint appearing on several devices at once can be a deploying implant. Confirm the destination + process and sweep the affected hosts."
             },
             "name": "h-new"
           },
@@ -406,7 +406,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## C2 tradecraft - process vs fingerprint contradictions\n**Process -> JA4 mismatch**: the JA4 b-section (chars 10-21) is a stable TLS-library identifier; a browser library from a non-browser process, Python/Go from a LOLBIN, or any TLS from a script-host LOLBIN is high-signal (uTLS parroting / DLL injection / loaders). Microsoft destinations are excluded."
+              "json": "## C2 tradecraft - process vs fingerprint contradictions\n**Process -> JA4 mismatch**: the JA4 b-section (chars 11-22) is a stable TLS-library identifier; a browser library from a non-browser process, Python/Go from a LOLBIN, or any TLS from a script-host LOLBIN is high-signal (uTLS parroting / DLL injection / loaders). Microsoft destinations are excluded.\n\n**Next step:** the **Mismatch** column says exactly what is contradictory. Confirm the **Proc** + **ProcFolders** - a known tool in a normal path can be allowlisted; an unknown binary in a user/temp path presenting a browser fingerprint is a strong implant lead - escalate."
             },
             "name": "h-tc"
           },
