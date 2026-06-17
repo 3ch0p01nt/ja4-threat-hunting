@@ -46,7 +46,7 @@ let ssl =
     | extend AF     = todynamic(AdditionalFields)
     | extend ja4_   = tostring(AF.ja4),    ja4s_   = tostring(AF.ja4s),
              sni    = tostring(AF.server_name),
-             issuer = tostring(AF.issuer), subject = tostring(AF.subject)
+             issuer = tostring(AF.issuer)
     | where isnotempty(ja4_)
     | where (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)
     | where not(isnotempty(sni) and sni has_any(msSni))

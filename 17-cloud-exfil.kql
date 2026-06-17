@@ -23,26 +23,26 @@ let sslPub =
 let pairAgg    = materialize(sslPub | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_);
 let totalConns = toscalar(pairAgg | summarize sum(Conns));
 let totalDevs  = toscalar(sslPub  | summarize dcount(DeviceId, 4));
-let rareSet = materialize(
+let rareSet = (
     pairAgg
     | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
     | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
     | extend R = min_of(Rhost, Rconn)
     | where R >= minRarity
     | project ja4_, R);
-let rareSsl = materialize(sslPub | lookup kind=inner rareSet on ja4_ | project ConnTime, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R);
-let cloudExfil = materialize(
+let rareSsl = (sslPub | lookup kind=inner rareSet on ja4_ | project ConnTime, DeviceId, DeviceName, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R);
+let cloudExfil = (
     CloudAppEvents
     | where TimeGenerated > ago(lookback)
     | where ActivityType in~ (exfilActivityTypes) or ActionType matches regex @"(?i)(upload|download|export|filesync|fileshare|filemov|filecop)" or IsAnonymousProxy == true
     | where IsAnonymousProxy == true or not(Application has_any (dynamic(["OneDrive","SharePoint","Microsoft Teams","Microsoft 365","Office 365","Exchange","Yammer","Skype","Microsoft Forms","Microsoft Stream"])))
     | project ExfilTime = TimeGenerated, Application, ActivityType, ActionType, AccountDisplayName, AccountObjectId = tostring(AccountObjectId), IPAddress = tostring(IPAddress), ObjectName, IsAnonymousProxy, CountryCode);
-let devicePublicIP = materialize(
+let devicePublicIP = (
     DeviceInfo
     | where TimeGenerated > ago(lookback) and isnotempty(PublicIP) and isnotempty(DeviceId)
     | summarize arg_max(TimeGenerated, PublicIP) by DeviceId
     | project DeviceId, PublicIP);
-let deviceToUpn = materialize(
+let deviceToUpn = (
     DeviceLogonEvents
     | where TimeGenerated > ago(lookback) and isnotempty(AccountName) and isnotempty(DeviceId)
     | summarize UPN = take_any(tolower(AccountName)) by DeviceId);

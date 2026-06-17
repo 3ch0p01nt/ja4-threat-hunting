@@ -25,22 +25,22 @@ let sslPub =
 let pairAgg    = materialize(sslPub | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_);
 let totalConns = toscalar(pairAgg | summarize sum(Conns));
 let totalDevs  = toscalar(sslPub  | summarize dcount(DeviceId, 4));
-let rareSet = materialize(
+let rareSet = (
     pairAgg
     | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
     | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
     | extend R = min_of(Rhost, Rconn)
     | project ja4_, R);
-let candidates = materialize(
+let candidates = (
     sslPub
     | lookup kind=leftouter rareSet on ja4_
     | extend R = coalesce(R, 0.0)
     | where R >= minRarity or nonBrowser or ja4_ == evilginxJa4);
-let devUpn = materialize(
+let devUpn = (
     DeviceLogonEvents
     | where TimeGenerated > ago(lookback) and isnotempty(AccountName) and isnotempty(DeviceId)
     | summarize by DeviceId, Acct = tolower(AccountName));
-let risky = materialize(
+let risky = (
     SigninLogs
     | where TimeGenerated > ago(lookback) and RiskLevelDuringSignIn in ("high","medium")
     | project SignInTime = TimeGenerated, UPN = tolower(UserPrincipalName), UPNPrefix = tolower(tostring(split(UserPrincipalName, "@")[0])), RiskLevel = RiskLevelDuringSignIn, RiskState, SignInIP = IPAddress, Location, AppDisplayName);
