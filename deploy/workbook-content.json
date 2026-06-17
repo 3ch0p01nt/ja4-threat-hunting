@@ -22,8 +22,8 @@
             "typeSettings": {
               "additionalResourceOptions": []
             },
-            "jsonData": "[{\"value\":\"7d\",\"label\":\"7 days\"},{\"value\":\"14d\",\"label\":\"14 days\"},{\"value\":\"30d\",\"label\":\"30 days\",\"selected\":true},{\"value\":\"60d\",\"label\":\"60 days\"},{\"value\":\"90d\",\"label\":\"90 days\"}]",
-            "value": "30d"
+            "jsonData": "[{\"value\":\"7d\",\"label\":\"7 days\",\"selected\":true},{\"value\":\"14d\",\"label\":\"14 days\"},{\"value\":\"30d\",\"label\":\"30 days\"},{\"value\":\"60d\",\"label\":\"60 days\"},{\"value\":\"90d\",\"label\":\"90 days\"}]",
+            "value": "7d"
           },
           {
             "version": "KqlParameterItem/1.0",
