@@ -1,9 +1,5 @@
 # JA4/JA4S threat-hunting workbook — user guide
 
-This standalone guide helps you use a Microsoft Sentinel workbook (interactive investigation dashboard; see Glossary) that reads JA4 and JA4S (client and server TLS fingerprints; see Glossary) from Microsoft Defender `DeviceNetworkEvents` (network telemetry table; see Glossary), stays Microsoft E5-native (see Glossary), and uses no external threat-intelligence feeds (see Glossary) for its core detections; it serves Tier-1 security operations center analysts (SOC analysts; see Glossary) first and gives detection engineers (see Glossary) enough context to tune and promote hunts later.
-
-🔴 Critical = act now > High > 🟠 Medium = review > 🔵 Low/Info
-
 - [What and why](#what-and-why)
 - [Prerequisites](#prerequisites)
 - [Deploy](#deploy)
@@ -18,6 +14,10 @@ This standalone guide helps you use a Microsoft Sentinel workbook (interactive i
 - [Changelog and sources](#changelog-and-sources)
 
 ## What and why
+
+This standalone guide helps you use a Microsoft Sentinel workbook (interactive investigation dashboard; see Glossary) that reads JA4 and JA4S (client and server TLS fingerprints; see Glossary) from Microsoft Defender `DeviceNetworkEvents` (network telemetry table; see Glossary), stays Microsoft E5-native (see Glossary), and uses no external threat-intelligence feeds (see Glossary) for its core detections; it serves Tier-1 security operations center analysts (SOC analysts; see Glossary) first and gives detection engineers (see Glossary) enough context to tune and promote hunts later.
+
+🔴 Critical = act now > High > 🟠 Medium = review > 🔵 Low/Info
 
 ## Prerequisites
 
