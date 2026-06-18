@@ -4994,7 +4994,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "// Workbook: KNOWN-MALWARE JA4+JA4S PAIR LOOKUP  (OPT-IN panel - toggle \"Known-bad lookup\" = On).\r\n// This is the ONE component that uses external reference data: FoxIO's PUBLIC ja4plus-mapping\r\n// (https://github.com/FoxIO-LLC/ja4) - documented C2 client(JA4)+server(JA4S) fingerprints. It is a\r\n// free public reference embedded as a static table, NOT a premium feed. An exact JA4+JA4S pair hit is\r\n// CRITICAL on its own and resolves the GoLang-library collision (Sliver shares one JA4 with many tools,\r\n// but its JA4S differs from a legitimate CDN). Verify hits before acting; fingerprints rotate ~yearly.\r\nlet lookback = {Lookback};\r\nlet malwarePairs = datatable(Family:string, ja4_:string, ja4s_:string) [\r\n    \"Sliver\",       \"t13d190900_9dc949149365_97f8aa674fd9\", \"t130200_1301_a56c5b993250\",\r\n    \"Sliver\",       \"t13i190800_9dc949149365_97f8aa674fd9\", \"t130200_1301_a56c5b993250\",\r\n    \"IcedID\",       \"t13d201100_2b729b4bf6f3_9e7b989ebec8\", \"t120300_c030_5e2616a54c73\",\r\n    \"CobaltStrike\", \"t12i190700_d83cc789557e_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n    \"CobaltStrike\", \"t12i210700_76e208dd3e22_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n    \"CobaltStrike\", \"t12d190800_d83cc789557e_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n    \"CobaltStrike\", \"t12d210800_76e208dd3e22_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n];\r\nlet ja4single = datatable(Family:string, ja4_:string) [\r\n    \"SoftEtherVPN\", \"t13d880900_fcb5b95cb75a_b0d3b4ac2a14\",   // 88-cipher JA4 is distinctive on its own\r\n    \"Evilginx (AiTM)\", \"t13d191000_9dc949149365_e7c285222651\", // GoLang net-package collision -> corroborate with a risky Entra sign-in / impossible travel\r\n];\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),\r\n             issuer = tostring(AF.issuer), subject = tostring(AF.subject)\r\n    | where isnotempty(ja4_)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, ja4_, ja4s_, sni, issuer, subject, isPublic;\r\nlet pairHits   = ssl | lookup kind=inner malwarePairs on ja4_, ja4s_ | extend MatchType = \"JA4+JA4S pair\";\r\nlet singleHits = ssl | lookup kind=inner ja4single   on ja4_        | extend MatchType = \"JA4 (distinctive)\";\r\n// JA4X-approximation: a self-signed cert with NO Organization/Country in the issuer to a PUBLIC dest\r\n// mirrors the FoxIO JA4X \"000000000000\" first section seen in Sliver/Havoc/Qakbot/Pikabot C2 certs.\r\nlet certHits = ssl\r\n    | where isPublic and isnotempty(issuer) and issuer == subject and issuer !has \"O=\" and issuer !has \"C=\"\r\n    | extend Family = \"self-CA C2-class cert\", MatchType = \"JA4X-approx (cert structure)\";\r\nunion pairHits, singleHits, certHits\r\n| summarize Devices = dcount(DeviceId, 4), DeviceNames = make_set(DeviceName, 5), Conns = count(),\r\n            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 5), Issuers = make_set(issuer, 3), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\r\n        by Family, MatchType, ja4_, ja4s_\r\n| extend Verdict = case(MatchType == \"JA4X-approx (cert structure)\", \"REVIEW - C2-class cert structure (verify)\",\r\n                        MatchType == \"JA4 (distinctive)\" and Family startswith \"Evilginx\", \"HIGH - AiTM JA4 (corroborate sign-in)\",\r\n                        \"CRITICAL - known malware fingerprint\")\r\n| project Verdict, Family, MatchType, ja4_, ja4s_, Devices, DeviceNames, Conns, Dests, Issuers, FirstSeen, LastSeen\r\n| sort by Verdict asc, Conns desc\r\n",
+              "query": "// Workbook: KNOWN-MALWARE JA4+JA4S PAIR LOOKUP  (OPT-IN panel - toggle \"Known-bad lookup\" = On).\r\n// This is the ONE component that uses external reference data: FoxIO's PUBLIC ja4plus-mapping\r\n// (https://github.com/FoxIO-LLC/ja4) - documented C2 client(JA4)+server(JA4S) fingerprints. It is a\r\n// free public reference embedded as a static table, NOT a premium feed. An exact JA4+JA4S pair hit is\r\n// CRITICAL on its own and resolves the GoLang-library collision (Sliver shares one JA4 with many tools,\r\n// but its JA4S differs from a legitimate CDN). Verify hits before acting; fingerprints rotate ~yearly.\r\nlet lookback = {Lookback};\r\nlet malwarePairs = datatable(Family:string, ja4_:string, ja4s_:string) [\r\n    \"Sliver\",       \"t13d190900_9dc949149365_97f8aa674fd9\", \"t130200_1301_a56c5b993250\",\r\n    \"Sliver\",       \"t13i190800_9dc949149365_97f8aa674fd9\", \"t130200_1301_a56c5b993250\",\r\n    \"IcedID\",       \"t13d201100_2b729b4bf6f3_9e7b989ebec8\", \"t120300_c030_5e2616a54c73\",\r\n    \"CobaltStrike\", \"t12i190700_d83cc789557e_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n    \"CobaltStrike\", \"t12i210700_76e208dd3e22_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n    \"CobaltStrike\", \"t12d190800_d83cc789557e_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n    \"CobaltStrike\", \"t12d210800_76e208dd3e22_16bbda4055b2\", \"t120300_c030_52d195ce1d92\",\r\n    \"SoftEther VPN\", \"t13d880900_fcb5b95cb75a_b0d3b4ac2a14\", \"t130200_1302_a56c5b993250\",   // FoxIO README: JA4S 1302=TLS_AES_256_GCM_SHA384 (distinct from Sliver 1301); weaponised by Flax Typhoon / Storm-0558\r\n];\r\nlet ja4single = datatable(Family:string, ja4_:string) [\r\n    \"SoftEtherVPN (IP-SNI)\", \"t13i880900_fcb5b95cb75a_b0d3b4ac2a14\",   // 88-cipher b-section is distinctive regardless of SNI; 'i'=raw-IP dest. FoxIO ja4plus-mapping.csv\r\n    \"Evilginx (AiTM)\", \"t13d191000_9dc949149365_e7c285222651\", // GoLang net-package collision -> corroborate with a risky Entra sign-in / impossible travel\r\n];\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name),\r\n             issuer = tostring(AF.issuer), subject = tostring(AF.subject)\r\n    | where isnotempty(ja4_)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, ja4_, ja4s_, sni, issuer, subject, isPublic;\r\nlet pairHits   = ssl | lookup kind=inner malwarePairs on ja4_, ja4s_ | extend MatchType = \"JA4+JA4S pair\";\r\nlet singleHits = ssl | lookup kind=inner ja4single   on ja4_        | extend MatchType = \"JA4 (distinctive)\";\r\n// JA4X-approximation: a self-signed cert with NO Organization/Country in the issuer to a PUBLIC dest\r\n// mirrors the FoxIO JA4X \"000000000000\" first section seen in Sliver/Havoc/Qakbot/Pikabot C2 certs.\r\nlet certHits = ssl\r\n    | where isPublic and isnotempty(issuer) and issuer == subject and issuer !has \"O=\" and issuer !has \"C=\"\r\n    | extend Family = \"self-CA C2-class cert\", MatchType = \"JA4X-approx (cert structure)\";\r\nunion pairHits, singleHits, certHits\r\n| summarize Devices = dcount(DeviceId, 4), DeviceNames = make_set(DeviceName, 5), Conns = count(),\r\n            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 5), Issuers = make_set(issuer, 3), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\r\n        by Family, MatchType, ja4_, ja4s_\r\n| extend Verdict = case(MatchType == \"JA4X-approx (cert structure)\", \"REVIEW - C2-class cert structure (verify)\",\r\n                        MatchType == \"JA4 (distinctive)\" and Family startswith \"Evilginx\", \"HIGH - AiTM JA4 (corroborate sign-in)\",\r\n                        \"CRITICAL - known malware fingerprint\")\r\n| project Verdict, Family, MatchType, ja4_, ja4s_, Devices, DeviceNames, Conns, Dests, Issuers, FirstSeen, LastSeen\r\n| sort by Verdict asc, Conns desc\r\n",
               "size": 0,
               "queryType": 0,
               "resourceType": "microsoft.operationalinsights/workspaces",
@@ -5936,6 +5936,940 @@
               }
             },
             "name": "q-velocity"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Encrypted-DNS C2 - DoH / DoT from a non-system process  *(new)*\nDNS-over-TLS/HTTPS hides C2 name-resolution inside TLS, defeating DNS monitoring. The JA4 ALPN **dt** = DNS-over-TLS (a hard tell no benign non-resolver emits), or a TLS connection to a known **DoH provider**. Only svchost (OS resolver) and browsers should do this - any other process is anomalous.\n\n**Next step:** identify the process; a LOLBIN or user/temp binary resolving over DoH/DoT is an instant triage item."
+            },
+            "name": "h-adv7"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Workbook: ENCRYPTED-DNS C2 (DoH / DoT from a non-system process). ATT&CK T1572 + T1071.004. DNS-over-TLS\r\n// and DNS-over-HTTPS hide C2 name-resolution (or the C2 channel itself) inside TLS, bypassing classic DNS\r\n// monitoring. Two tells: (A) JA4 a-section ALPN == \"dt\" = DNS-over-TLS advertised in the ClientHello (a hard\r\n// protocol identifier no benign non-resolver process emits); (B) a TLS connection to a known public DoH\r\n// provider. On Windows 11 only svchost/System (OS resolver) and browsers (native DoH over h2) should do this -\r\n// ANY other process using encrypted DNS is anomalous, and a LOLBIN / user-path binary doing it is high-signal.\r\nlet lookback = {Lookback};\r\nlet dohSnIs = dynamic([\r\n    \"cloudflare-dns.com\",\"dns.cloudflare.com\",\"mozilla.cloudflare-dns.com\",\"one.one.one.one\",\r\n    \"dns.google\",\"dns.quad9.net\",\"doh.opendns.com\",\"dns.nextdns.io\",\"doh.cleanbrowsing.org\",\r\n    \"dns.adguard.com\",\"dns.adguard-dns.com\",\"doh.mullvad.net\",\"doh.dns.sb\",\"dns.controld.com\"]);\r\nlet dohIPs = dynamic([\"1.1.1.1\",\"1.0.0.1\",\"8.8.8.8\",\"8.8.4.4\",\"9.9.9.9\",\"149.112.112.112\",\r\n    \"208.67.222.222\",\"208.67.220.220\",\"94.140.14.14\",\"94.140.15.15\"]);\r\nlet systemDnsProcs = dynamic([\"svchost.exe\",\"system\",\"dns.exe\",\"ntoskrnl.exe\",\"lsass.exe\",\"mdnsresponder.exe\"]);\r\nlet browserProcs   = dynamic([\"chrome.exe\",\"msedge.exe\",\"firefox.exe\",\"brave.exe\",\"opera.exe\",\"vivaldi.exe\",\r\n    \"arc.exe\",\"msedgewebview2.exe\",\"tor.exe\",\"librewolf.exe\",\"waterfox.exe\"]);\r\nlet lolbins = dynamic([\"rundll32.exe\",\"regsvr32.exe\",\"mshta.exe\",\"powershell.exe\",\"pwsh.exe\",\"wscript.exe\",\r\n    \"cscript.exe\",\"certutil.exe\",\"bitsadmin.exe\",\"msbuild.exe\",\"installutil.exe\",\"cmd.exe\",\"curl.exe\"]);\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), sni = tostring(AF.server_name), next_protocol = tostring(AF.next_protocol)\r\n    | where strlen(ja4_) >= 10\r\n    | extend alpn = substring(ja4_, 8, 2)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | extend isDot = (alpn == \"dt\" or next_protocol == \"dot\")                       // DNS-over-TLS (hard tell)\r\n    | extend isDoh = (isnotempty(sni) and sni has_any (dohSnIs)) or (RemoteIP in (dohIPs))   // known DoH provider\r\n    | where isPublic and (isDot or isDoh)\r\n    | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, sni, alpn, isDot, isDoh;\r\nlet dohDevices = materialize(ssl | distinct DeviceId);   // bound the ConnectionSuccess firehose to only DoH/DoT devices\r\nlet procs =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"ConnectionSuccess\" and isnotempty(InitiatingProcessFileName)\r\n    | where DeviceId in (dohDevices)\r\n    | summarize ProcFolder = take_any(InitiatingProcessFolderPath),\r\n                Signer = take_any(InitiatingProcessVersionInfoCompanyName)\r\n            by DeviceId, RemoteIP, RemotePort, Proc = tolower(InitiatingProcessFileName);\r\nssl\r\n| join kind=leftouter procs on DeviceId, RemoteIP, RemotePort\r\n| extend Proc = coalesce(Proc, \"(unattributed)\")\r\n| where not(Proc in~ (systemDnsProcs)) and not(Proc in~ (browserProcs))   // OS resolver + native-DoH browsers are expected\r\n| extend isLolbin   = (Proc in~ (lolbins))\r\n| extend isUserPath = (ProcFolder has \"appdata\" or ProcFolder hasprefix \"c:\\\\users\\\\\" or ProcFolder has \"\\\\temp\\\\\" or ProcFolder has \"\\\\downloads\\\\\")\r\n| extend Signal = case(isDot, \"DNS-over-TLS (dt ALPN - hard tell)\", isDoh, \"DoH to known provider (SNI/IP match)\", \"encrypted DNS\")\r\n| summarize Devices = dcount(DeviceId, 4), Conns = count(), Procs = make_set(Proc, 8),\r\n            SampleDevices = make_set(DeviceName, 4), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 8),\r\n            AnyLolbin = max(isLolbin), AnyUserPath = max(isUserPath), AnyUnattrib = max(Proc == \"(unattributed)\"),\r\n            Signal = take_any(Signal), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\r\n        by ja4_\r\n| extend Verdict = case(\r\n    AnyLolbin,   \"HIGH - encrypted DNS from a LOLBIN (DNS C2 via DoH/DoT)\",\r\n    AnyUserPath, \"HIGH - encrypted DNS from a user-path binary (DNS C2 vector)\",\r\n    AnyUnattrib, \"MEDIUM - unattributed DoH/DoT (possible injected code)\",\r\n                 \"MEDIUM - non-system, non-browser process using encrypted DNS\")\r\n| project Verdict, JA4 = ja4_, Signal, Procs, Dests, Devices, Conns, AnyLolbin, AnyUserPath, SampleDevices, FirstSeen, LastSeen\r\n| sort by AnyLolbin desc, AnyUserPath desc, Devices asc\r\n| take 200\r\n",
+              "size": 0,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Verdict",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "CRITICAL",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "HIGH",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "PUBLIC",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "MEDIUM",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "REVIEW",
+                          "representation": "question",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "LOW",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Low",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "info",
+                          "text": "{0}"
+                        }
+                      ]
+                    },
+                    "customWidth": "240"
+                  },
+                  {
+                    "columnMatch": "Conns",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of connections observed for this row."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Client JA4",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the CLIENT software (the program making the HTTPS connection). You do not need to decode it - the Why/Reasons column explains it."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4s_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Server JA4S",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the SERVER that answered. JA4 + JA4S together identify a specific application or malware family."
+                    }
+                  },
+                  {
+                    "columnMatch": "bsec",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "TLS library",
+                    "tooltipFormat": {
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "q-doh"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Rare JA4 -> many destinations (C2 infrastructure rotation)  *(new)*\nOne rare non-browser fingerprint fanning out to many distinct public IPs/SNIs = domain/IP rotation, DGA, or proxy hopping - one implant, many call-out addresses.\n\n**Next step:** review the destination set; a single tool reaching 8+ unrelated public addresses is classic C2 rotation."
+            },
+            "name": "h-adv8"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Workbook: RARE JA4 -> MANY DESTINATIONS (C2 infrastructure rotation). A single rare client fingerprint\r\n// fanning out to many distinct PUBLIC IPs/SNIs = domain/IP rotation, DGA, or proxy hopping - one implant,\r\n// many call-out addresses. Distinct from velocity (host SPREAD of one JA4) and cyclers (fingerprint VARIANTS).\r\n// Rarity is computed tenant-wide, then destination fan-out is measured for the rare non-browser fingerprints.\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};\r\nlet browserBsec = dynamic([\"8daaf6152771\",\"55b375c5d22e\",\"5b57614c22b0\",\"a09f3c656075\"]);\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)\r\n    | where isnotempty(ja4_) and strlen(ja4_) >= 22\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | where isPublic;\r\nlet perJa4 = ssl | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_;\r\nlet totalConns = toscalar(perJa4 | summarize sum(Conns));\r\nlet totalDevs  = toscalar(ssl | summarize dcount(DeviceId, 4));\r\nlet rare = perJa4\r\n    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))\r\n    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))\r\n    | extend R = min_of(Rhost, Rconn)\r\n    | where R >= minRarity\r\n    | project ja4_, R;\r\nssl\r\n| lookup kind=inner rare on ja4_\r\n| where not(substring(ja4_, 11, 12) in (browserBsec))   // browsers legitimately fan out to many sites; this hunts NON-browser rotation\r\n| summarize IPs = dcount(RemoteIP, 4), SNIs = dcountif(sni, isnotempty(sni), 4), Devices = dcount(DeviceId, 4),\r\n            Conns = count(), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 12), ServerJA4S = make_set(ja4s_, 5),\r\n            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated), R = max(R)\r\n        by ja4_\r\n| extend DestSpread = max_of(IPs, SNIs)\r\n| where DestSpread >= 8                                  // one rare fingerprint reaching many distinct addresses\r\n| extend Verdict = case(DestSpread >= 25, \"HIGH - rare JA4 rotating across many destinations (C2 infra rotation / DGA)\",\r\n                        \"MEDIUM - rare JA4 spread across multiple destinations\")\r\n| project Verdict, JA4 = ja4_, DestSpread, DistinctIPs = IPs, DistinctSNIs = SNIs, Devices, Conns,\r\n          Rarity = round(R, 2), ServerJA4S, Dests, FirstSeen, LastSeen\r\n| sort by DestSpread desc, Rarity desc\r\n| take 200\r\n",
+              "size": 0,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Verdict",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "CRITICAL",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "HIGH",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "PUBLIC",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "MEDIUM",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "REVIEW",
+                          "representation": "question",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "LOW",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Low",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "info",
+                          "text": "{0}"
+                        }
+                      ]
+                    },
+                    "customWidth": "240"
+                  },
+                  {
+                    "columnMatch": "DestSpread",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Client JA4",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the CLIENT software (the program making the HTTPS connection). You do not need to decode it - the Why/Reasons column explains it."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4s_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Server JA4S",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the SERVER that answered. JA4 + JA4S together identify a specific application or malware family."
+                    }
+                  },
+                  {
+                    "columnMatch": "bsec",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "TLS library",
+                    "tooltipFormat": {
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "q-fanout"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Rare destination <- many rare JA4 (redirector / staging)  *(new)*\nThe inverse view: one public IP receiving many **distinct** rare fingerprints from **few** devices = a redirector, payload-staging host, or shared C2 listener that many different tools check in to.\n\n**Next step:** investigate the destination IP; confirm it is not a shared CDN before escalating."
+            },
+            "name": "h-adv9"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Workbook: RARE DESTINATION <- MANY RARE JA4 (redirector / staging node / shared C2 listener). A single\r\n// PUBLIC IP receiving many DISTINCT rare client fingerprints from FEW devices = a server that many different\r\n// tools/implants check in to. Destination-keyed - the inverse of every client-keyed panel. A shared corporate\r\n// egress NATs many clients, so this keys on the REMOTE (destination) IP and requires non-browser rare fingerprints.\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};\r\nlet browserBsec = dynamic([\"8daaf6152771\",\"55b375c5d22e\",\"5b57614c22b0\",\"a09f3c656075\"]);\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name)\r\n    | where isnotempty(ja4_) and strlen(ja4_) >= 22\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | where isPublic and not(substring(ja4_, 11, 12) in (browserBsec));\r\nlet perJa4 = ssl | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_;\r\nlet totalConns = toscalar(perJa4 | summarize sum(Conns));\r\nlet totalDevs  = toscalar(ssl | summarize dcount(DeviceId, 4));\r\nlet rare = perJa4\r\n    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))\r\n    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))\r\n    | extend R = min_of(Rhost, Rconn)\r\n    | where R >= minRarity\r\n    | project ja4_, R;\r\nssl\r\n| lookup kind=inner rare on ja4_\r\n| summarize RareJA4s = dcount(ja4_, 4), Devices = dcount(DeviceId, 4), Conns = count(),\r\n            Fingerprints = make_set(ja4_, 12), ServerJA4S = make_set(ja4s_, 5), SNIs = make_set(sni, 6),\r\n            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated), MaxR = max(R)\r\n        by RemoteIP\r\n| where RareJA4s >= 4 and Devices <= 10                 // many distinct rare fingerprints, concentrated on few hosts (campaign, not fleet-wide CDN)\r\n| extend Verdict = case(RareJA4s >= 10, \"HIGH - one destination receiving many rare fingerprints (redirector / shared C2)\",\r\n                        \"MEDIUM - destination aggregating multiple rare fingerprints (staging candidate; verify it is not a shared CDN)\")\r\n| project Verdict, RemoteIP, RareJA4s, Devices, Conns, Rarity = round(MaxR, 2), Fingerprints, ServerJA4S, SNIs, FirstSeen, LastSeen\r\n| sort by RareJA4s desc, Rarity desc\r\n| take 200\r\n",
+              "size": 0,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Verdict",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "CRITICAL",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "HIGH",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "PUBLIC",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "MEDIUM",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "REVIEW",
+                          "representation": "question",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "LOW",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Low",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "info",
+                          "text": "{0}"
+                        }
+                      ]
+                    },
+                    "customWidth": "240"
+                  },
+                  {
+                    "columnMatch": "RareJA4s",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Client JA4",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the CLIENT software (the program making the HTTPS connection). You do not need to decode it - the Why/Reasons column explains it."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4s_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Server JA4S",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the SERVER that answered. JA4 + JA4S together identify a specific application or malware family."
+                    }
+                  },
+                  {
+                    "columnMatch": "bsec",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "TLS library",
+                    "tooltipFormat": {
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "q-fanin"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## Non-standard TLS curve (custom / handcrafted TLS stack)  *(new)*\nTLS 1.3 libraries negotiate x25519, secp256r1, or secp384r1. A rare fingerprint negotiating **any other** named curve is a custom or stripped TLS build - common in bespoke loaders/implants that spoof a JA4 but cannot replicate the standard curve.\n\n**Next step:** the **Curves** column shows the anomalous group; a rare JA4 with an exotic curve to a public dest is high-signal."
+            },
+            "name": "h-adv10"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "// Workbook: NON-STANDARD TLS CURVE on a RARE JA4 (handcrafted / custom TLS stack). Production TLS 1.3\r\n// libraries negotiate one of three key-exchange groups: x25519, secp256r1, secp384r1. A rare client\r\n// fingerprint that negotiates ANY OTHER named curve (secp192r1, brainpool*, prime192v1, sect*, ffdhe*) is a\r\n// custom or stripped TLS build - common in bespoke malware loaders/implants that spoof a JA4 but cannot\r\n// replicate the standard curve. The `curve` field is a verified AdditionalFields key (negotiated named group).\r\n// Rarity is computed tenant-wide; the non-standard-curve filter is applied after the rarity join.\r\nlet lookback = {Lookback};\r\nlet minRarity = {MinRarity};\r\nlet stdCurves = dynamic([\"x25519\",\"secp256r1\",\"secp384r1\",\"X25519\",\"SECP256R1\",\"SECP384R1\"]);\r\nlet ssl =\r\n    DeviceNetworkEvents\r\n    | where TimeGenerated > ago(lookback) and ActionType == \"SslConnectionInspected\"\r\n    | where AdditionalFields has \"ja4\"\r\n    | extend AF = todynamic(AdditionalFields)\r\n    | extend ja4_ = tostring(AF.ja4), ja4s_ = tostring(AF.ja4s), sni = tostring(AF.server_name), curve = tostring(AF.curve)\r\n    | where isnotempty(ja4_)\r\n    | extend isPublic = (isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false)\r\n    | where isPublic;\r\nlet perJa4 = ssl | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_;\r\nlet totalConns = toscalar(perJa4 | summarize sum(Conns));\r\nlet totalDevs  = toscalar(ssl | summarize dcount(DeviceId, 4));\r\nlet rare = perJa4\r\n    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))\r\n    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))\r\n    | extend R = min_of(Rhost, Rconn)\r\n    | where R >= minRarity\r\n    | project ja4_, R;\r\nssl\r\n| where isnotempty(curve) and not(curve in (stdCurves))   // anything other than the three standard TLS1.3 groups\r\n| lookup kind=inner rare on ja4_\r\n| summarize Devices = dcount(DeviceId, 4), Conns = count(), Curves = make_set(curve, 6),\r\n            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 8), ServerJA4S = make_set(ja4s_, 5),\r\n            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated), R = max(R)\r\n        by ja4_\r\n| extend Verdict = \"HIGH - rare JA4 negotiating a non-standard TLS curve (custom / handcrafted TLS stack)\"\r\n| project Verdict, JA4 = ja4_, Curves, Devices, Conns, Rarity = round(R, 2), ServerJA4S, Dests, FirstSeen, LastSeen\r\n| sort by Rarity desc, Conns desc\r\n| take 200\r\n",
+              "size": 0,
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Verdict",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "icons",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "CRITICAL",
+                          "representation": "critical",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "HIGH",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "PUBLIC",
+                          "representation": "error",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "MEDIUM",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "warning",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "REVIEW",
+                          "representation": "question",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "LOW",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Low",
+                          "representation": "info",
+                          "text": "{0}"
+                        },
+                        {
+                          "operator": "Default",
+                          "thresholdValue": null,
+                          "representation": "info",
+                          "text": "{0}"
+                        }
+                      ]
+                    },
+                    "customWidth": "240"
+                  },
+                  {
+                    "columnMatch": "Devices",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "palette": "red"
+                    },
+                    "tooltipFormat": {
+                      "tooltip": "Number of endpoints that presented this fingerprint. Fewer = rarer / more targeted."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Client JA4",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the CLIENT software (the program making the HTTPS connection). You do not need to decode it - the Why/Reasons column explains it."
+                    }
+                  },
+                  {
+                    "columnMatch": "ja4s_",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Server JA4S",
+                    "tooltipFormat": {
+                      "tooltip": "TLS fingerprint of the SERVER that answered. JA4 + JA4S together identify a specific application or malware family."
+                    }
+                  },
+                  {
+                    "columnMatch": "bsec",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "TLS library",
+                    "tooltipFormat": {
+                      "tooltip": "The cipher-hash part of the JA4 (chars 11-22) - a stable identifier of the TLS LIBRARY (Chromium / Firefox / Python / Go / WinINET). A library that does not match the process is suspicious."
+                    }
+                  },
+                  {
+                    "columnMatch": "JitterCV",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Jitter (CV)",
+                    "tooltipFormat": {
+                      "tooltip": "Coefficient of variation (stdev/mean) of the gaps between connections. Below ~0.2 = very regular = C2-like; above ~1 = irregular = benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "MeanIntervalMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Avg interval (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Average minutes between call-homes to this destination."
+                    }
+                  },
+                  {
+                    "columnMatch": "MatchTier",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Match closeness",
+                    "tooltipFormat": {
+                      "tooltip": "How closely the fingerprint ties to the incident: flow-exact (same flow) > host+time > host-any > shared-IP."
+                    }
+                  },
+                  {
+                    "columnMatch": "Mismatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Why suspicious",
+                    "tooltipFormat": {
+                      "tooltip": "The exact process-vs-TLS-library contradiction detected (e.g. a browser library from a non-browser process)."
+                    }
+                  },
+                  {
+                    "columnMatch": "DaysActive",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Days active",
+                    "tooltipFormat": {
+                      "tooltip": "Span from first-seen to last-seen. A fingerprint active for many days across many hosts is usually benign."
+                    }
+                  },
+                  {
+                    "columnMatch": "TimeGapMin",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Time gap (min)",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the JA4 callout and the corroborating event (sign-in / cloud upload). Smaller = stronger correlation."
+                    }
+                  },
+                  {
+                    "columnMatch": "MinutesFromEmail",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Mins from email",
+                    "tooltipFormat": {
+                      "tooltip": "Minutes between the phishing email delivery and the rare callout. Under ~10 = likely an automated click-to-implant callback."
+                    }
+                  },
+                  {
+                    "columnMatch": "ClosestMatch",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Closest match",
+                    "tooltipFormat": {
+                      "tooltip": "Time between this fingerprints connection and the incident alert. Smaller = a tighter match."
+                    }
+                  },
+                  {
+                    "columnMatch": "DistinctRemoteIPs",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Distinct dest IPs",
+                    "tooltipFormat": {
+                      "tooltip": "How many different destination IPs this fingerprint reached."
+                    }
+                  },
+                  {
+                    "columnMatch": "TotalConnections",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Connections",
+                    "tooltipFormat": {
+                      "tooltip": "Total connections observed for this fingerprint pair."
+                    }
+                  },
+                  {
+                    "columnMatch": "SpanHours",
+                    "formatter": 1,
+                    "formatOptions": {},
+                    "label": "Span (hours)",
+                    "tooltipFormat": {
+                      "tooltip": "Hours between the first and last beacon in this series."
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "q-curve"
           }
         ]
       },
