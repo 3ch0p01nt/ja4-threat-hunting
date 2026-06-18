@@ -7,6 +7,8 @@ A Microsoft Sentinel workbook + KQL toolkit that stacks **JA4/JA4s TLS fingerpri
 incidents, scores **incident-match fidelity**, triages **rare suspicious fingerprints**, and detects
 **beaconing** — all Microsoft Defender / E5-native (no external threat-intel feeds).
 
+**New here? Read the [user guide](GUIDE.md).**
+
 ## Deploy the workbook
 
 [![Deploy To Azure US Gov](https://aka.ms/deploytoazuregovbutton)](https://portal.azure.us/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2F3ch0p01nt%2Fja4-threat-hunting%2Fmain%2Fdeploy%2Fazuredeploy.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2F3ch0p01nt%2Fja4-threat-hunting%2Fmain%2Fdeploy%2FcreateUiDefinition.json)
@@ -68,4 +70,3 @@ It deploys regardless — sections without data simply return no rows.
 MISP decaying models (temporal decay) · Pyramid of Pain (JA4 ranks above IP) · JA4 / JA4+ spec (structure
 decode, JA4_ac) · FoxIO ja4plus-mapping (opt-in known-bad only) · detection-engineering proximity scoring ·
 Recorded Future / STIX confidence bands.
-
