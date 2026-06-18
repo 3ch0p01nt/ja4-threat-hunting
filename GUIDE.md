@@ -189,7 +189,7 @@ Use these procedures when you need to turn a workbook row into a decision. Start
 
 1. Set **Section** to **Hunt** and open the beaconing panel.
 2. Start with rows that combine high **BeaconScore**, high **Rarity**, and an unfamiliar **Dest** or **SampleRemoteIP**.
-3. Read **DeviceName**, `ja4_`, **Dest**, **BeaconScore**, **Connections**, **MeanIntervalMin**, **JitterCV**, **Rarity**, **SpanHours**, **FirstSeen**, and **LastSeen**.
+3. Read **DeviceName**, `ja4_`, **Dest**, **BeaconScore**, **Connections**, **MedianIntervalMin**, **JitterCV**, **Rarity**, **SpanHours**, **FirstSeen**, and **LastSeen**.
 4. Pivot to the device timeline for the same device and time window. Identify the process that made the repeated connections and check its signer, path, command line, parent process, and recent file activity.
 5. Compare the destination with known update, telemetry, and security-agent services. Benign software can beacon; suspicious C2 usually pairs regular timing with a rare JA4, a public non-corporate destination, no SNI, or an unexpected process.
 6. Escalate when the same host shows regular call-homes plus a rare fingerprint and unexplained process or destination. Close as benign only when the process and destination are approved and the timeline has no corroborating suspicious activity.
