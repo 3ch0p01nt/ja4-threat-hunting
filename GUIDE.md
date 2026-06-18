@@ -46,9 +46,38 @@ For Bicep, Azure CLI, and Az PowerShell deployment paths, use [deploy/README.md]
 
 ## Quickstart — your first JA4 investigation
 
+Use this linear walkthrough for your first 10-minute hunt. For control definitions, use [Parameter reference](#parameter-reference); for score meanings, use [Concepts — how JA4 and the scores work](#concepts-how-ja4-and-the-scores-work).
+
+1. Open Microsoft Sentinel, choose your workspace, and open the **JA4/JA4S Threat Hunting** workbook.
+2. Set **Lookback window** (time range control; see Glossary) to **7d**.
+3. Set **Min rarity** (rarity gate; see Glossary) to **0.7**.
+4. Set **Section** (workbook view selector; see Glossary) to **Top Leads**.
+5. Set **Known-bad lookup** (static known-malware comparison; see Glossary) to **Off**.
+6. Read the first red row. Start with **Verdict**, then **Score**, then **Why**.
+7. Copy the `ja4_` value from that row.
+8. Use the row's **Procs** value and destination (remote service; see Glossary) to pivot into the device timeline in Microsoft Defender.
+9. Match the process, destination, and row verdict against this decision tree:
+
+```text
+Top red row
+  |
+  +-- Critical or High, Score >= 50, and Procs is unknown or unexpected?
+  |       -> Escalate and attach the ja4_ value, process, destination, and row details.
+  |
+  +-- Medium, Score >= 30, and Procs is expected for the destination?
+  |       -> Review the device timeline and document benign context.
+  |
+  +-- Low/Info or known business process?
+          -> Close as informational unless another panel corroborates it.
+```
+
+You've completed your first hunt — next: [Worked example A](#worked-example-a-rare-ja4-process-mismatch).
+
 ## Concepts — how JA4 and the scores work
 
 ## How-to guides
+
+### Worked example A — rare JA4 process mismatch
 
 ## Panel reference
 
