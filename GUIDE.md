@@ -272,6 +272,8 @@ Use these procedures when you need to turn a workbook row into a decision. Start
 
 This reference explains what each workbook panel shows, how to read its highest-value columns, and when to escalate or tune the result.
 
+> **Note on the Tunables lines below.** Each entry lists the panel's own `let lookback = 30d;` as written in its query. In the deployed workbook the **Lookback window** parameter (default **7d** — see [Parameter reference](#parameter-reference)) overrides this for every panel, so the window you actually see is set by the dropdown at the top, not the hardcoded `30d`.
+
 ### 01 Top Prioritized Leads   (leads · `wb_leads.kql`)
 **What it detects:** The highest-priority JA4/JA4S leads across three engines: suspicious rare fingerprints, beaconing call-homes, and fingerprints that correlate to existing Sentinel incidents.
 **Hunt hypothesis:** "Malware command-and-control or hands-on-keyboard tooling shows up as rare TLS client/server fingerprints, periodic TLS call-homes, or TLS fingerprints near an existing incident in Defender XDR and Sentinel telemetry."
