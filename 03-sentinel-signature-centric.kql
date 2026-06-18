@@ -39,7 +39,8 @@ let rare = materialize(
     | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(TotalConnections)) / log(todouble(totalConns))))
     | extend R = min_of(Rhost, Rconn)
     | where R >= minRarity);
-let rareConns = ja4conn | join kind=leftsemi (rare | project ja4_, ja4s_) on ja4_, ja4s_ | project cTime, DeviceId, RemoteIP, ja4_, ja4s_;
+let rarePairKeys = materialize(rare | extend pk = strcat(ja4_, "|", ja4s_) | distinct pk);
+let rareConns = ja4conn | extend pk = strcat(ja4_, "|", ja4s_) | where pk in (rarePairKeys) | project cTime, DeviceId, RemoteIP, ja4_, ja4s_;   // broadcast-filter the firehose by the small rare-pair set (no shuffle)
 // alert -> incident map
 let incMap =
     SecurityIncident
