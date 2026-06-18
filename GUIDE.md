@@ -71,7 +71,7 @@ Top red row
           -> Close as informational unless another panel corroborates it.
 ```
 
-You've completed your first hunt — next: [Worked example A](#worked-example-a-rare-ja4-process-mismatch).
+You've completed your first hunt — next: [Worked example A](#worked-example-a-cobalt-strike-shape).
 
 ## Concepts — how JA4 and the scores work
 
@@ -174,7 +174,99 @@ Normal vs suspicious: normal software update checks may be regular but usually u
 
 ## How-to guides
 
-### Worked example A — rare JA4 process mismatch
+Use these procedures when you need to turn a workbook row into a decision. Start with the Tier-1 steps; use the detection-engineer callout only when you own tuning or rule creation.
+
+### Investigate a rare TLS fingerprint
+
+1. Start from a **Top Leads** or triage row with an uncommon `ja4_`. Read **Verdict**, **Score**, **Why**, **Rarity**, **Procs**, **Dests**, **FirstSeen**, and **LastSeen**.
+2. Confirm the process. If **Procs** is empty or surprising, pivot from **DeviceName** or **DeviceId** plus the row time window into the Microsoft Defender device timeline and look for the matching connection.
+3. Confirm the destination. Treat public, non-Microsoft, raw-IP, no-SNI, or newly seen destinations as more suspicious than known business services.
+4. Decode the fingerprint enough to explain the signal: the a-section gives the visible TLS shape, the b-section suggests the TLS library, and the c-section can identify a stable toolchain shape.
+5. Review the device timeline for process tree, command line, signer, folder path, file downloads, logons, and nearby alerts.
+6. Escalate when rarity plus process/destination evidence stays suspicious. Dismiss only when the process, signer, folder, destination, and timeline all explain the row as expected business activity. Record the `ja4_`, `ja4s_`, process, destination, time window, and reason.
+
+### Detect C2 beaconing from a host
+
+1. Set **Section** to **Hunt** and open the beaconing panel.
+2. Start with rows that combine high **BeaconScore**, high **Rarity**, and an unfamiliar **Dest** or **SampleRemoteIP**.
+3. Read **DeviceName**, `ja4_`, **Dest**, **BeaconScore**, **Connections**, **MeanIntervalMin**, **JitterCV**, **Rarity**, **SpanHours**, **FirstSeen**, and **LastSeen**.
+4. Pivot to the device timeline for the same device and time window. Identify the process that made the repeated connections and check its signer, path, command line, parent process, and recent file activity.
+5. Compare the destination with known update, telemetry, and security-agent services. Benign software can beacon; suspicious C2 usually pairs regular timing with a rare JA4, a public non-corporate destination, no SNI, or an unexpected process.
+6. Escalate when the same host shows regular call-homes plus a rare fingerprint and unexplained process or destination. Close as benign only when the process and destination are approved and the timeline has no corroborating suspicious activity.
+
+### Enable and use the known-bad lookup
+
+1. Set **Known-bad lookup** to **On** before you run the known-bad/reference view.
+2. Use this lookup deliberately: it runs the opt-in FoxIO public known-malware JA4 mapping embedded as a static table in the workbook, not a live premium feed.
+3. Read **Verdict**, **Family**, **MatchType**, `ja4_`, `ja4s_`, **Devices**, **DeviceNames**, **Conns**, **Dests**, **Issuers**, **FirstSeen**, and **LastSeen**.
+4. Treat an exact **JA4+JA4S pair** hit as critical after you verify it occurred on the listed device and destination. The embedded pair table includes Sliver, IcedID, Cobalt Strike, and SoftEther VPN fingerprints; the single-JA4 table includes SoftEther VPN IP-SNI and Evilginx AiTM shapes.
+5. Verify the row before acting. Fingerprints rotate, some tools can be sanctioned in limited environments, and single-JA4 matches such as Evilginx need identity or session-theft corroboration.
+6. Escalate verified malware-pair hits with the family, `ja4_`, `ja4s_`, device, destination, and time window. For Evilginx, pivot to sign-in logs before you decide the account action.
+
+### Tune false positives with the process→JA4 baseline
+
+1. Set **Section** to **Destination & inventory** and open the process→JA4 baseline panel.
+2. Use the baseline as your local known-good catalog. It lists expected **Proc**, **Library**, **bsec**, **DistinctDevices**, **TotalConns**, **DistinctJA4s**, **Signers**, **SampleSNIs**, **FirstSeen**, and **LastSeen**.
+3. For a noisy mismatch row, compare its process and b-section with the baseline. A common, signed, fleet-wide `(process, library)` pair with expected sample SNIs is a stronger false-positive candidate than a one-off user-path process.
+4. Add allowlist entries as narrowly as possible: process name plus b-section/library, signer, and destination class when available. Avoid allowlisting an entire JA4 if only one approved application explains it.
+5. Re-run the mismatch and Top Leads panels. The tuned entry should suppress only the expected `(process, library)` pair and should not hide user/temp paths, LOLBINs, or non-Microsoft external destinations.
+6. Document the allowlist reason, owner, evidence, and review date so a future analyst knows why the row disappeared.
+
+### Adjust beacon thresholds
+
+1. Start from the default beacon controls: **Beacon min connections** = `8` and **Beacon min score** = `50`.
+2. Lower **Beacon min connections** to `4` or **Beacon min score** to `40` when you are hunting low-and-slow malware or a short incident window. Expect more benign updater and telemetry rows.
+3. Raise **Beacon min connections** to `12` or `16`, or **Beacon min score** to `60` or `70`, when the panel is noisy and you need only the most regular call-home patterns.
+4. Re-run the panel after each change and compare row count, **BeaconScore**, **Connections**, **Rarity**, **Dest**, and **DeviceName**.
+5. Keep the threshold set that still surfaces the suspicious host while removing explained business traffic. Save the setting for the hunt notes or propose it for an analytic rule only after validation.
+
+### 🔧 For detection engineers: promote a panel to a Sentinel analytic rule
+
+1. Choose a panel that already produces a clear Tier-1 action, such as known-bad pair hits, C2 TLS shape, process/library mismatch, or AiTM corroboration.
+2. Copy the panel KQL into a scheduled Microsoft Sentinel analytic rule and keep the workbook comment header so future maintainers know the hypothesis and source panel.
+3. Set **Rule name** to the analyst task and signal, for example `JA4 - Cobalt Strike TLS shape`.
+4. Set **Severity** to match the panel verdict you want to alert on: Critical for exact malware fingerprints, High for corroborated C2 or AiTM patterns, and Medium for review-only hunts.
+5. Set **MITRE tactic/technique** to the behavior the panel detects, such as Command and Control for beaconing or Credential Access/Initial Access for AiTM session theft.
+6. Set **Run frequency** and **Lookback** so the lookback is at least as long as the frequency and wide enough for the panel logic. Beaconing and AiTM windows usually need more lookback than exact known-bad matches.
+7. Set **Alert threshold** to `> 0` results unless you deliberately aggregate multiple rows before alerting.
+8. Set **Entity mapping** from the columns the panel returns: host from **DeviceName** or **DeviceId**, IP from **RemoteIP**, **SampleRemoteIP**, or **SignInIP**, account from **UPN**, URL/DNS from **Dest** or **SNI**, and keep `ja4_`, `ja4s_`, process, verdict, and why fields as custom details.
+9. Run the query over recent data, confirm the alert payload includes enough context for triage, then enable the rule.
+
+### Worked example A — Cobalt Strike shape
+
+**Situation:** A Top Leads or C2 TLS-shape row reports client `t12i190700_d83cc789557e_16bbda4055b2` with server JA4S `t120300_c030_52d195ce1d92`.
+
+**Decode the signal:** The client JA4 starts with TLS 1.2 and no ALPN, and its c-section is `16bbda4055b2`. The FoxIO JA4 mapping embedded in the toolkit identifies that c-section as the Cobalt Strike WinINET beacon client section. The server JA4S `t120300_c030_52d195ce1d92` is the matching Cobalt Strike server fingerprint.
+
+**Corroborate:** Check **Why** for `CS client c-section` and `CS server JA4S`. Then check **Procs**, **Dests**, **Devices**, **Conns**, **AnyUserPath**, **FirstSeen**, and **LastSeen**. In the confirmed case, **Procs** is `rundll32.exe` and **Dests** is a non-Microsoft external destination.
+
+**Verdict:** Cobalt Strike is confirmed. The two exact tells are the client c-section `16bbda4055b2` and the server JA4S `t120300_c030_52d195ce1d92`; `rundll32.exe` to a non-Microsoft external destination corroborates execution.
+
+**Action:** Escalate to incident response, isolate the device, attach the row details, and hunt the same `ja4_` fleet-wide.
+
+### Worked example B — AiTM session theft
+
+**Situation:** The AiTM corroboration panel shows a risky Entra sign-in and a rare or non-browser JA4 on that user's device within 30 minutes. The JA4 is the Evilginx shape `t13d191000_9dc949149365_e7c285222651`.
+
+**Decode the signal:** The panel treats `t13d191000_9dc949149365_e7c285222651` as an Evilginx AiTM JA4. Its b-section `9dc949149365` overlaps with Go tooling, so you should not rely on the JA4 alone; the risky sign-in and time proximity are the decisive corroboration.
+
+**Corroborate:** Check **UPN**, **DeviceName**, **RiskLevel**, **RiskState**, `ja4_`, `ja4s_`, **bsec**, **Rarity**, **nonBrowser**, **SignInIP**, **Location**, **AppDisplayName**, **SNI**, **SignInTime**, **ConnTime**, **TimeGapMin**, and **Why**. A small **TimeGapMin** and a target app such as O365 or SharePoint point to business-email-compromise risk.
+
+**Verdict:** Treat the row as critical AiTM session theft when the Evilginx JA4, risky sign-in, and 30-minute device correlation all line up.
+
+**Action:** Revoke the user's sessions, force MFA re-registration, preserve SigninLogs and device/network evidence, and hand the case to the identity or IR owner.
+
+### Worked example C — process/library mismatch
+
+**Situation:** The process/library mismatch panel reports b-section `8daaf6152771` attributed to `rundll32.exe`.
+
+**Decode the signal:** The b-section `8daaf6152771` is the Chromium TLS library. `rundll32.exe` is a LOLBIN and should not originate Chromium-style TLS. That contradiction points to uTLS parroting, DLL injection, or a loader borrowing another TLS stack.
+
+**Corroborate:** Check **Severity**, **Mismatch**, **Proc**, **bsec**, `ja4_`, **Devices**, **Conns**, **AnyUserPath**, **ProcFolders**, **Dests**, **FirstSeen**, and **LastSeen**. A non-Microsoft external destination makes the row malicious until proven otherwise; a Microsoft domain can be a benign WebView2 false positive that needs timeline review.
+
+**Verdict:** Treat `rundll32.exe` plus Chromium b-section `8daaf6152771` to a non-Microsoft external destination as a high-severity process/library mismatch consistent with injection or TLS parroting.
+
+**Action:** Investigate the process tree in the Microsoft Defender device timeline, then isolate and escalate if the parent process, command line, folder path, or destination remains unexplained.
 
 ## Panel reference
 
