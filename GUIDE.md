@@ -75,6 +75,103 @@ You've completed your first hunt — next: [Worked example A](#worked-example-a-
 
 ## Concepts — how JA4 and the scores work
 
+This section explains the fields and scores you read in the workbook. Use it when a row has a score you need to interpret before you escalate or close.
+
+### JA4 structure
+
+JA4 splits the TLS ClientHello (client setup message; see Glossary) into an a-section (clear-text feature string; see Glossary), b-section (cipher-suite hash; see Glossary), and c-section (extension and signature-algorithm hash; see Glossary). This diagram uses zero-based character positions.
+
+```text
+t13d1516h2_8daaf6152771_e5627efa2ab1
+|--------| |----------| |----------|
+ 0    9    11      22   24      35
+ a-section b-section  c-section
+
+ a-section chars 0-9:  t | 13 | d | 15 | 16 | h2
+                        |   |   |    |    |   |
+                        |   |   |    |    |   +-- ALPN (application-layer protocol negotiation; see Glossary)
+                        |   |   |    |    +------ extension count
+                        |   |   |    +----------- cipher count
+                        |   |   +---------------- SNI flag (server name indication; see Glossary)
+                        |   +-------------------- TLS version
+                        +------------------------ protocol family
+
+ b-section chars 11-22: 8daaf6152771 = sorted-cipher hash = a version-stable TLS library identifier
+ c-section chars 24-35: e5627efa2ab1 = extension+sigalg hash = extension and signature-algorithm shape
+```
+
+The a-section tells you the visible ClientHello shape: protocol, TLS version, SNI flag, cipher count, extension count, and ALPN. Normal browsers and platform libraries usually produce stable a-sections for a given release family.
+
+The b-section is the stable library clue. When a non-browser process presents a Chromium-like or Firefox-like b-section, you should treat the process and library combination as a contradiction until the device timeline explains it.
+
+The c-section captures extension ordering and signature algorithms. It often stays consistent for a toolchain even when the destination changes.
+
+### JA4S, JA4_ac, and why this beats JA3 and IP
+
+JA4S (server TLS fingerprint; see Glossary) describes the ServerHello (server setup response; see Glossary). JA4 plus JA4S lets you compare both sides of a TLS session instead of judging only the client.
+
+JA4_ac (a+c composite fingerprint; see Glossary) keeps the a-section and c-section while dropping the b-section. That makes it stable across cipher rotation (cipher cycling; see Glossary). Use it when a tool rotates cipher suites but keeps the same broader client shape.
+
+JA4 beats JA3 (older TLS fingerprint format; see Glossary) and IP address indicators (network locations; see Glossary) because it sits higher on the Pyramid of Pain (defender model for indicator durability; see Glossary). Attackers can change IPs quickly, but changing a TLS library or malware TLS stack without breaking behavior costs more effort.
+
+### SslConnectionInspected is metadata, not decryption
+
+`SslConnectionInspected` records ClientHello and ServerHello metadata inspection. It is **not** TLS decryption: the workbook can see fingerprint shape, timing, destination, certificate metadata, and process context, but it cannot read page content, message bodies, credentials, or decrypted files.
+
+### Rarity
+
+Formula: `R = min(Rhost, Rconn)`, where each component is `log(N/n) / log(N)`.
+
+| Rarity value | Meaning |
+|---|---|
+| `≥ 0.95` | ≈ ~1 device or near-singleton activity. |
+| `0.85–0.95` | Very few devices or connections. |
+| `0.7–0.85` | Uncommon and inside the default hunt focus. |
+| `< 0.7` | Common or likely benign. |
+
+Worked example: in a fleet with `N ≈ 332,000` devices, a fingerprint seen on `n = 3` devices has `Rhost = log(332000/3) / log(332000) ≈ 0.91`. If it appears in `n = 50` connections, `Rconn = log(332000/50) / log(332000) ≈ 0.69`, so `R = min(0.91, 0.69) = 0.69`.
+
+Normal vs suspicious: normal browser and update traffic often lands below `0.7`; suspicious rows combine high rarity with an unexpected process, unknown destination, or another corroborating panel.
+
+### MatchFidelity
+
+Formula: `MatchFidelity = 100 × Specificity × TemporalDecay × Rarity × SeverityWeight`.
+
+- Specificity (match closeness; see Glossary): flow-exact `1.0` > host+time `0.85` > host-any `0.6` > shared-IP `0.35`.
+- TemporalDecay (time-distance discount; see Glossary): `max(0.02, 1 − (dt/τ)²)`, with `τ = 2h`.
+- SeverityWeight (incident severity multiplier; see Glossary): High `1.0`, Medium `0.7`, Low `0.45`, Informational or unknown `0.2`.
+- Bands: High `>= 75`, Medium `>= 40`, Low `>= 20`, Informational `> 0`.
+
+Worked example: a flow-exact match to a High incident, `30m` from the alert, with `Rarity = 0.85` scores `100 × 1.0 × (1 − (0.5h/2h)²) × 0.85 × 1.0 = 79.7`, which rounds to High.
+
+Normal vs suspicious: normal rows are loose shared-IP or old host-any matches with common fingerprints; suspicious rows are recent, flow-exact or host+time matches on rare fingerprints tied to High or Medium incidents.
+
+### SuspicionScore
+
+Formula: `SuspicionScore = clamp(0, 100, strong adders + supporting adders − benign penalties)`.
+
+Strong adders: LOLBIN (living-off-the-land binary; see Glossary) `+35`, self-signed-to-public certificate `+30`, legacy-TLS `+25`, and no-extensions `+20`. Benign penalties: known-good library+process `−30`, Microsoft-issued certificate `−20`, and aged+widespread `−15`.
+
+Bands: Critical `>= 80`, High `>= 50`, Medium `>= 30`, Low `< 30`.
+
+Worked example: `rundll32.exe` to a public destination with a self-signed certificate, legacy TLS, and no extensions scores `35 + 30 + 25 + 20 = 110`, then clamps to `100`, so the verdict is Critical.
+
+Normal vs suspicious: normal rows lose urgency when the TLS library matches the expected process, the certificate is Microsoft-issued, or the fingerprint is aged and widespread; suspicious rows keep multiple strong adders after those penalties.
+
+### BeaconScore
+
+Base formula: `CVScore = 100 × (1 − CV)`, where `CV = stddev / mean` for inter-arrival times. Current formula: `BeaconScore = max(CVScore, IQRScore)`, where `IQRScore` is an interquartile-range score (IQR; see Glossary) that tolerates occasional jitter.
+
+Pattern = regular / jittered / low-and-slow. Regular means the cadence is tight, jittered means the cadence has deliberate or natural variation, and low-and-slow means few connections spread over a long span still keep a regular cadence.
+
+Worked example: call-home gaps of `10, 10, 11, 9, 10, 35` minutes have an outlier. Mean is about `14.2`, sample standard deviation is about `10.2`, `CV ≈ 0.72`, and `CVScore ≈ 28`. The IQR score stays near `90` because most gaps remain `9-11` minutes, so the BeaconScore stays high and the Pattern is jittered.
+
+Normal vs suspicious: normal software update checks may be regular but usually use common JA4 values and trusted destinations; suspicious beacons pair high BeaconScore with rare JA4, unknown destinations, raw IPs, no SNI, or an unexpected process.
+
+### Verdict legend recap
+
+🔴 Critical = act now > High > 🟠 Medium = review > 🔵 Low/Info.
+
 ## How-to guides
 
 ### Worked example A — rare JA4 process mismatch
