@@ -52,7 +52,8 @@ let rare = materialize(
     | extend R = min_of(Rhost, Rconn)
     | where R >= minRarity);
 // Recover the process behind the JA4 via ConnectionSuccess (same flow, +-180s) - ONLY for rare pairs.
-let rareConns = ssl | join kind=leftsemi (rare | project ja4_, ja4s_) on ja4_, ja4s_ | project DeviceId, RemoteIP, RemotePort, cTime = Timestamp, ja4_, ja4s_;
+let rarePairKeys = materialize(rare | extend pk = strcat(ja4_, "|", ja4s_) | distinct pk);
+let rareConns = ssl | extend pk = strcat(ja4_, "|", ja4s_) | where pk in (rarePairKeys) | project DeviceId, RemoteIP, RemotePort, cTime = Timestamp, ja4_, ja4s_;   // broadcast-filter the firehose by the small rare-pair set (no shuffle)
 let procs =
     DeviceNetworkEvents
     | where Timestamp > ago(lookback) and ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)

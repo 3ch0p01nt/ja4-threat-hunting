@@ -68,9 +68,11 @@ let rare = materialize(
     | where R >= minRarity and AnyTrusted);
 // Recover only the trusted-SNI + public connections from rare pairs.
 // ssl is re-evaluated (lazy let, not cached) but gated hard: only rare-pair rows pass.
+let rarePairKeys = materialize(rare | extend pk = strcat(ja4_, "|", ja4s_) | distinct pk);
 let rareConns =
     ssl
-    | join kind=leftsemi (rare | project ja4_, ja4s_) on ja4_, ja4s_
+    | extend pk = strcat(ja4_, "|", ja4s_)
+    | where pk in (rarePairKeys)   // broadcast-filter the firehose by the small rare-pair set (no shuffle)
     | where isTrustedSni and isPublic
     | project TimeGenerated, DeviceId, DeviceName, RemoteIP, RemotePort, ja4_, ja4s_, sni;
 // Process attribution: de-dup by flow key before join to keep cardinality tractable.
