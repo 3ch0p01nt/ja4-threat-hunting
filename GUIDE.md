@@ -281,6 +281,24 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `TimeGenerated`, `DeviceId`, `DeviceName`, `RemoteIP`, `RemotePort`, `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `AdditionalFields.issuer`, `AdditionalFields.subject`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`; `SecurityIncident` and `SecurityAlert` — `IncidentNumber`, `Title`, `Severity`, `AlertIds`, `SystemAlertId`, entity `MdatpDeviceId`, entity `Address`; rarity-gated: yes for the suspicious-fingerprint and beacon engines, while the incident engine also keeps the inline known-bad JA4/JA4S seed pairs; known-bad lookup: n/a (not the opt-in workbook lookup).
 **How it works:** The query computes combined rarity `R = min(host rarity, connection rarity)` for each JA4/JA4S pair, then filters the high-volume network stream to rare pairs with an efficient small-set broadcast filter. Engine 1 scores rare public-destination fingerprints with corroborating process/certificate/JA4-structure signals; engine 2 finds regular rare JA4 call-homes; engine 3 correlates rare or inline known-bad pairs to `SecurityIncident`/`SecurityAlert` within tight time/entity windows. The top 50 rows are sorted by `Score` and `LastSeen`; use the Sources & validation card for the FoxIO JA4 mapping, LOLBAS LOLBIN definitions, MITRE ATT&CK C2 context, and Pyramid of Pain rationale.
 
+**Sample query (excerpt):** the detection heart of `wb_leads.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+    | lookup kind=leftouter (rare | project ja4_, ja4s_, R) on ja4_, ja4s_
+    | extend MatchFidelity = toint(round(100.0 * rowScore * coalesce(R, 1.0)))
+    | where MatchFidelity >= 40
+    | extend MatchTier = case(Stier == 1.0, "flow-exact", Stier == 0.85, "host+time", Stier == 0.6, "host-any", "shared-ip")
+    | project Category = "Matches an incident", Score = MatchFidelity, JA4 = strcat(ja4_, "  /  ", ja4s_), Why = strcat(MatchTier, " match to incident #", IncidentNumber, " (", ITitle, "), ", toint(dt / 60), " min from alert"), Where = ITitle, Detail = strcat("incident #", IncidentNumber), LastSeen = cT;
+union triage, beacon, fidelity
+| extend NextStep = case(
+    Category == "Suspicious fingerprint", "Verify the process is one you expect on this host; check the destination; review the device timeline. Unknown process + self-signed cert to a public IP = isolate + escalate.",
+    Category == "Beaconing call-home", "Judge the destination (known vendor/update vs raw IP / unknown domain); confirm the interval looks C2-like; then check DNS and the calling process.",
+    Category == "Matches an incident", "Open the linked incident - this fingerprint is added evidence. Sweep other hosts for the same JA4.",
+    "Read the Why, then confirm the process and destination.")
+| project Score, Category, Why, Destination = Where, Hosts = Detail, NextStep, JA4, LastSeen
+| sort by Score desc, LastSeen desc
+| take 50
+```
+
 **Output columns** — | Column | What it means |
 |---|---|
 | `Score` | A 0-100 priority score, but the formula depends on `Category`: suspicious fingerprints use the additive TLS/process `SuspicionScore`; beaconing uses regularity score; incident matches use severity-, time-, specificity-, and rarity-weighted `MatchFidelity`. Higher means investigate first within that category. |
@@ -313,6 +331,24 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `TimeGenerated`, `DeviceId`, `RemoteIP`, `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `AdditionalFields.issuer`, `AdditionalFields.subject`; rarity-gated: no, although several tiles count pairs where `R >= minRarity`; known-bad lookup: n/a.
 **How it works:** The query counts devices, distinct JA4 client fingerprints, distinct JA4/JA4S pairs, destinations, and legacy TLS connections across the lookback. It also calculates combined rarity for each JA4/JA4S pair and uses `minRarity = 0.7` to count rare-focus pairs, rare public self-signed pairs, and rare public no-SNI pairs. Use Microsoft Learn from the Sources & validation card for Defender table and field meanings, and the Pyramid of Pain card to explain why fingerprint counts matter more than IP counts.
 
+**Sample query (excerpt):** the detection heart of `wb_tiles.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let scored = pairs
+    | extend R = min_of(iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices)))),
+                        iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns)))));
+union
+ (baseMetrics | project Value = Devices     | extend Metric = "Devices seen", Sort = 1),
+ (baseMetrics | project Value = DistinctJA4 | extend Metric = "Distinct client fingerprints", Sort = 2),
+ (scored | summarize Value = count() | extend Metric = "JA4 x JA4S pairs (all)", Sort = 3),
+ (scored | where R >= minRarity | summarize Value = count() | extend Metric = "Rare pairs (focus)", Sort = 4),
+ (scored | where R >= minRarity and AnySelf == 1 | summarize Value = count() | extend Metric = "Rare + self-signed (public)", Sort = 5),
+ (scored | where R >= minRarity and AnyNoSNIpub == 1 | summarize Value = count() | extend Metric = "Rare + no-SNI (public)", Sort = 6),
+ (baseMetrics | project Value = LegacyConns   | extend Metric = "Legacy-TLS connections", Sort = 7),
+ (baseMetrics | project Value = DistinctDests | extend Metric = "Distinct destinations", Sort = 8)
+| project Metric, Value, Sort
+| sort by Sort asc
+```
+
 **Output columns** — | Column | What it means |
 |---|---|
 | `Metric` | The tile name. It tells you what the `Value` is counting. |
@@ -331,6 +367,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1071.001 (Application layer protocol: Web protocols) · T1218 (System binary proxy execution)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `TimeGenerated`, `DeviceId`, `RemoteIP`, `RemotePort`, `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `AdditionalFields.issuer`, `AdditionalFields.subject`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`; rarity-gated: yes (`R >= minRarity`); known-bad lookup: n/a.
 **How it works:** The query first computes rarity for each JA4/JA4S pair and keeps only rare pairs, then joins those exact rare flows to `ConnectionSuccess` events within plus/minus `180` seconds to recover the initiating process. It requires corroboration: at least one strong signal (`LOLBIN`, legacy TLS, public self-signed certificate, or no TLS extensions to a public host) or at least two weak signals (no SNI, no ALPN, user/temp-path process, SNI is an IP, very few ciphers, or unusually many ciphers). It then scores the row from `0` to `100`, subtracts benign-rollout or known-good-library penalties, and uses the Sources & validation card for JA4 structure, LOLBAS, and Pyramid of Pain context.
+
+**Sample query (excerpt):** the detection heart of `wb_triage.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| where StrongCount >= 1 or WeakCount >= 2              // CORROBORATION
+| extend DaysActive = datetime_diff('day', LastSeen, FirstSeen)
+| extend AgePenalty = iff(DaysActive > 14 and DistinctDevices >= 3, -15, 0)   // benign-rollout discount
+| extend bsec = substring(ja4_, 11, 12), ProcsSafe = coalesce(Procs, dynamic([]))
+| extend knownGoodLib = (
+       (bsec in ("8daaf6152771", "55b375c5d22e") and array_length(set_intersect(ProcsSafe, dynamic(["chrome.exe","msedge.exe","brave.exe","opera.exe","vivaldi.exe","arc.exe","msedgewebview2.exe","teams.exe","ms-teams.exe","slack.exe","code.exe","discord.exe"]))) > 0)
+    or (bsec == "5b57614c22b0" and array_length(set_intersect(ProcsSafe, dynamic(["firefox.exe","thunderbird.exe","tor.exe","librewolf.exe"]))) > 0)
+    or (bsec == "85036bcba153" and array_length(set_intersect(ProcsSafe, dynamic(["python.exe","python3.exe","pythonw.exe"]))) > 0))
+| extend BenignPenalty = iff(knownGoodLib, -30, 0) + iff(AnyMsIssuer, -20, 0)
+| extend SuspicionScore = max_of(0, min_of(100,
+        iff(AnyLolbin, 35, 0) + iff(legacy, 25, 0) + iff(AnySelfSignedPub, 30, 0) + iff(noExt, 20, 0) + iff(AnyEmptyOrgPub, 10, 0)
+      + iff(AnySniIpPub, 15, 0) + iff(fewCiphers, 12, 0) + iff(noSNI, 12, 0) + iff(AnyUserPath, 12, 0) + iff(manyCiphers, 10, 0) + iff(noALPN, 8, 0))
+      + AgePenalty + BenignPenalty)
+// …
+| extend Verdict = case(SuspicionScore >= 80, "Critical", SuspicionScore >= 50, "High", SuspicionScore >= 30, "Medium", "Low")
+| project ja4_, ja4s_, Verdict, SuspicionScore, Reasons, Procs, SampleSNIs, Issuers,
+          Rarity = round(R, 2), DistinctDevices, DistinctRemoteIPs, TotalConnections, DaysActive, FirstSeen, LastSeen
+| sort by SuspicionScore desc, Rarity desc, DistinctDevices asc
+```
 
 **Output columns** — | Column | What it means |
 |---|---|
@@ -372,6 +430,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `TimeGenerated`, `DeviceId`, `DeviceName`, `RemoteIP`, `AdditionalFields.ja4`, `AdditionalFields.server_name`; rarity-gated: yes (`JA4 Rarity >= minRarity`); known-bad lookup: n/a.
 **How it works:** The query groups events by `DeviceId`, `ja4_`, and destination, where destination is SNI when present and `RemoteIP` when SNI is empty. It calculates inter-arrival deltas, keeps median intervals from `30` seconds to `172800` seconds (`2` days), and computes a jitter-tolerant `BeaconScore` as the maximum of a coefficient-of-variation score and an interquartile-range score. Rows qualify either as normal beacon candidates (`Connections >= 8` and `BeaconScore >= 50`) or low-and-slow sleepers (`Connections >= 4`, `SpanHours >= 48`, and `BeaconScore >= 60`).
 
+**Sample query (excerpt):** the detection heart of `wb_beacon.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+ssl
+| where ja4_ in (rareJa4Set)   // broadcast-filter the firehose by the small rare-ja4 set (no shuffle)
+| summarize Timestamps = make_list(TimeGenerated), Connections = count(), SampleRemoteIP = take_any(RemoteIP),
+            DeviceName = take_any(DeviceName), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by DeviceId, ja4_, Dest
+// …
+| extend CVScore = 100.0 * (1.0 - min_of(1.0, CV))
+| extend RobustScore = iff(P75 == 0, 0.0, 100.0 * (todouble(P25) / todouble(P75)))   // IQR-based regularity: tolerates jitter + the few outliers that wreck a pure CV
+| extend BeaconScore = toint(round(max_of(CVScore, RobustScore)))                     // best of tight-CV and robust-IQR, so a jittered-but-periodic beacon is not lost
+| extend SpanHours = round(datetime_diff('minute', LastSeen, FirstSeen) / 60.0, 1)
+| extend Pattern = case(Connections < minConns, "low-and-slow (sleeper)", CV > 0.25, "jittered", "regular")
+| where (Connections >= minConns and BeaconScore >= minBeaconScore)
+     or (Connections >= minConnsLow and SpanHours >= 48 and BeaconScore >= 60)        // low-and-slow: few call-homes over a long span, still regular = sleeper implant
+| join kind=leftouter rarity on ja4_
+| project DeviceName, ja4_, Dest, SampleRemoteIP, BeaconScore, Pattern, Connections,
+          MedianIntervalMin = round(MedianSec / 60.0, 1), JitterCV = round(CV, 2),
+          Rarity = round(Rarity, 2), SpanHours, FirstSeen, LastSeen
+| sort by BeaconScore desc, Rarity desc, Connections desc
+```
+
 **Output columns** — | Column | What it means |
 |---|---|
 | `DeviceName` | Sample host name for the device that produced the beacon pattern. Use it to pivot to the device timeline. |
@@ -410,6 +490,25 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `TimeGenerated`, `DeviceId`, `RemoteIP`, `AdditionalFields.ja4`, `AdditionalFields.server_name`; rarity-gated: no (`new == inherently rare` in this query); known-bad lookup: n/a.
 **How it works:** The query uses one scan of the last `30` days and treats the last `2` days as the `newWindow`. For each JA4, it counts historic events before the new window and recent events inside it, then keeps only JA4 values with `SeenHistoric == 0` and `NewConns >= 3`. It adds simple JA4-structure notes, such as legacy TLS or no SNI, so the analyst can spot higher-risk new fingerprints; the FoxIO JA4 mapping in the Sources & validation card explains why sudden new fingerprints in stable estates are worth review.
 
+**Sample query (excerpt):** the detection heart of `wb_firstseen.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+base
+| summarize SeenHistoric = countif(TimeGenerated < ago(newWindow)),
+            NewConns     = countif(TimeGenerated >= ago(newWindow)),
+            NewDevices   = dcountif(DeviceId, TimeGenerated >= ago(newWindow), 4),
+            Dests        = make_set_if(coalesce(sni, tostring(RemoteIP)), TimeGenerated >= ago(newWindow), 5),
+            FirstSeen    = minif(TimeGenerated, TimeGenerated >= ago(newWindow)),
+            LastSeen     = maxif(TimeGenerated, TimeGenerated >= ago(newWindow)) by ja4_
+| where SeenHistoric == 0 and NewConns >= 3   // never in baseline (brand new) + not a one-off
+| extend Spread = iff(NewDevices >= 2, "spreading (multi-host)", "single host")
+| extend cipherCnt = toint(substring(ja4_, 4, 2)), extCnt = toint(substring(ja4_, 6, 2))
+| extend Note = strcat(iff(substring(ja4_, 1, 2) in ("10","11","s3","s2"), "legacy-TLS ", ""),
+                       iff(substring(ja4_, 3, 1) == "i", "no-SNI ", ""), iff(extCnt == 0, "no-ext ", ""),
+                       iff(cipherCnt between (1 .. 3), "few-ciphers ", ""))
+| project ja4_, NewDevices, NewConns, Spread, Note, Dests, FirstSeen, LastSeen
+| sort by NewDevices desc, NewConns desc
+```
+
 **Output columns** — | Column | What it means |
 |---|---|
 | `ja4_` | The newly observed JA4 client TLS fingerprint. It identifies the TLS client handshake shape that was not seen in the earlier baseline. |
@@ -433,6 +532,19 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1001 (Data obfuscation) · T1071.001 (Application layer protocol: Web protocols)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `TimeGenerated`, `DeviceId`, `RemoteIP`, `AdditionalFields.ja4`, `AdditionalFields.server_name`; rarity-gated: no; known-bad lookup: n/a.
 **How it works:** The query derives `ja4_ac` by keeping the first `10` characters of JA4 (the a-section/client shape) and the final `12`-character c-section hash, while dropping the middle cipher-hash b-section. It then counts distinct full JA4 strings that share the same `ja4_ac` and keeps rows where `DistinctJa4 >= 4`. This follows the FoxIO/GreyNoise JA4_ac idea: if only the cipher hash changes while the rest stays stable, the same tool or actor may be cycling ciphers.
+
+**Sample query (excerpt):** the detection heart of `wb_cyclers.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+    | extend ja4_ac = strcat(substring(ja4_, 0, 10), "_", substring(ja4_, 24, 12))   // a + c, drop b (cipher hash)
+    | project TimeGenerated, DeviceId, RemoteIP, ja4_, ja4_ac, sni;
+base
+| summarize DistinctJa4 = dcount(ja4_, 4), Variants = make_set(ja4_, 8), Conns = count(), Devices = dcount(DeviceId, 4),
+            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 5), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by ja4_ac
+| where DistinctJa4 >= 4                     // same a+c but 4+ cipher variants = cipher cycling
+| project ja4_ac, DistinctJa4, Devices, Conns, Dests, FirstSeen, LastSeen, Variants
+| sort by DistinctJa4 desc, Conns desc
+```
 
 **Output columns** — | Column | What it means |
 |---|---|
@@ -458,6 +570,18 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `DeviceId`, `AdditionalFields.ja4`, `AdditionalFields.ja4s`; rarity-gated: no (it calculates rarity for all pairs); known-bad lookup: n/a.
 **How it works:** The query counts connections and distinct devices for every JA4/JA4S pair in the `30`-day lookback. It calculates combined rarity `R = min(host rarity, connection rarity)`, then bins `R` into `0.1`-wide buckets. The result is a compact distribution that helps choose a `minRarity` setting for the hunt panels.
 
+**Sample query (excerpt):** the detection heart of `wb_landscape.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let pairs = materialize(ssl | summarize Conns = count(), Devs = dcount(DeviceId, 4) by ja4_, ja4s_);
+let totalConns   = toscalar(pairs | summarize sum(Conns));
+let totalDevices = toscalar(ssl | summarize dcount(DeviceId, 4));
+pairs
+| extend R = min_of(iff(totalDevices <= 1, 1.0, max_of(0.0, log(todouble(totalDevices) / todouble(Devs)) / log(todouble(totalDevices)))),
+                    iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns)))))
+| summarize Pairs = count() by RarityBucket = bin(R, 0.1)
+| sort by RarityBucket asc
+```
+
 **Output columns** — | Column | What it means |
 |---|---|
 | `RarityBucket` | The lower edge of a `0.1`-wide rarity bucket created by `bin(R, 0.1)`. Example: `0.7` means `0.70 <= R < 0.80`; `0.9` means `0.90 <= R < 1.00`. Higher buckets are rarer. |
@@ -475,6 +599,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1055 (Process Injection) · T1036 (Masquerading) · T1218 (System Binary Proxy Execution)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.server_name`, `RemoteIP`, `RemotePort`, `DeviceId`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`, `InitiatingProcessVersionInfoCompanyName`; rarity-gated: yes (`minRarity = 0.7`); known-bad: n/a
 **How it works:** The query reads `SslConnectionInspected`, parses `ja4_`, and extracts `bsec = substring(ja4_, 11, 12)`. It computes tenant-wide JA4 rarity, keeps only rare public destinations, then joins those exact flows to `ConnectionSuccess` process attribution. It suppresses normal browser processes, Microsoft SNIs, and expected Go signers/processes, then emits only rows where `Mismatch` is non-empty.
+
+**Sample query (excerpt):** the detection heart of `wb_mismatch.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| join kind=inner procs on DeviceId, RemoteIP, RemotePort   // procs is now small (non-browser only) -> optimizer broadcasts it instead of shuffling the SSL base (avoids the 5GB join)
+| extend goExpected = (Signer has "Google" or Signer has "HashiCorp" or Signer has "Cloudflare" or Signer has "Docker" or Proc has "go" or Proc has "kubectl" or Proc has "node")
+| extend Mismatch = case(
+    IsBrowserMasq, strcat("Browser binary '", Proc, "' running TLS from a non-standard path (masquerade / dropped loader)"),
+    Proc in~ (lolbinProcs), strcat("TLS initiated by LOLBIN script-host '", Proc, "' = a system binary that should never originate TLS (injection / loader)"),
+    (bsec in (chromiumBsec)) and not (Proc in~ (chromiumProcs)), strcat("Chromium TLS library (b-section ", bsec, ") from non-browser '", Proc, "' = uTLS parroting or DLL injection into the TLS stack"),
+    (bsec == firefoxBsec) and not (Proc in~ (firefoxProcs)), strcat("Firefox TLS library (b-section ", bsec, ") from non-Firefox '", Proc, "' = uTLS parroting or injection"),
+    (bsec == pythonBsec) and (Proc !has "python"), strcat("Python TLS library (b-section ", bsec, ") from '", Proc, "' which is not Python = scripted TLS masquerading as another process"),
+    (bsec in (goBsec)) and not(goExpected), strcat("Go TLS library (b-section ", bsec, ") from unexpected '", Proc, "' = Go-based implant or tool (e.g. Sliver)"),
+    "")
+| where isnotempty(Mismatch) and isPublic and not(isnotempty(sni) and sni has_any (msSni))
+| extend isUserPath = (ProcFolder has "appdata" or ProcFolder hasprefix "c:\\users\\" or ProcFolder has "\\temp\\")
+| summarize Conns = count(), Devices = dcount(DeviceId, 4), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+            ProcFolders = make_set(ProcFolder, 4), AnyUserPath = max(isUserPath), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by Mismatch, Proc, bsec, ja4_
+| extend Severity = case(Proc in~ (lolbinProcs) or AnyUserPath, "High", "Medium")
+| project Severity, Mismatch, Proc, bsec, ja4_, Devices, Conns, AnyUserPath, ProcFolders, Dests, FirstSeen, LastSeen
+| sort by Severity asc, Devices asc, Conns asc
+```
 **Output columns** —
 
 | Column | What it means |
@@ -511,6 +657,27 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1071.001 (Web Protocols) · T1218 (System Binary Proxy Execution)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `RemoteIP`, `RemotePort`, `DeviceId`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`; rarity-gated: partial (exact Cobalt Strike branch is not gated; TLS-shape branch requires `minRarity = 0.7`); known-bad: n/a (embedded Cobalt Strike constants, not the opt-in lookup)
 **How it works:** The query parses `tlsVer = substring(ja4_, 1, 2)`, `alpn = substring(ja4_, 8, 2)`, and `csec = substring(ja4_, 24, 12)`. Exact Cobalt Strike hits fire when the client c-section is `16bbda4055b2` or the server JA4S is `t120300_c030_52d195ce1d92`; the `Why` text names FoxIO `ja4plus-mapping` for the documented client fingerprint. Non-exact shape hits require TLS 1.2, no ALPN (`alpn == "00"`), a rare JA4, a suspicious process, a public destination, and not a Microsoft SNI.
+
+**Sample query (excerpt):** the detection heart of `wb_c2shape.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+    | extend R = min_of(Rhost, Rconn) | where R >= minRarity | project ja4_);
+// …
+union b1, b2
+| extend isUserPath = (ProcFolder has "appdata" or ProcFolder hasprefix "c:\\users\\" or ProcFolder has "\\temp\\")
+| extend isMsDest  = (isnotempty(sni) and sni has_any (msSni))
+| where exactCs or (shape and suspProc and not(isMsDest))
+| extend Why = strcat(iff(csec == csCsec, strcat("client TLS c-section ", csec, " = documented Cobalt Strike WinINET beacon fingerprint (FoxIO ja4plus-mapping); "), ""),
+                      iff(ja4s_ == csJa4s, strcat("server JA4S ", ja4s_, " = Cobalt Strike default TeamServer response; "), ""),
+                      iff(shape, "ClientHello is TLS 1.2 with no ALPN = malleable-C2 default shape (real browsers negotiate ALPN h2); ", ""),
+                      iff(suspProc, strcat("initiating process '", Proc, "' is a LOLBIN/script-host that should not originate TLS; "), ""),
+                      iff(isUserPath, "process runs from a user/temp path (not a normal install location); ", ""))
+| summarize Conns = count(), Devices = dcount(DeviceId, 4), Procs = make_set(Proc, 5), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+            AnyExactCs = max(exactCs), AnyUserPath = max(isUserPath), Why = take_any(Why), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by ja4_, ja4s_
+| extend Verdict = iff(AnyExactCs, "CRITICAL - Cobalt Strike fingerprint", "HIGH - C2 TLS shape + suspicious process")
+| project Verdict, ja4_, ja4s_, Why, Procs, Devices, Conns, AnyUserPath, Dests, FirstSeen, LastSeen
+| sort by Verdict asc, Devices asc, Conns asc
+```
 **Output columns** —
 
 | Column | What it means |
@@ -546,6 +713,21 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1071.001 (Web Protocols)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `AdditionalFields.issuer`, `AdditionalFields.subject`, `RemoteIP`, `DeviceId`; rarity-gated: no (uses explicit common-client and rare-server thresholds instead of `minRarity`); known-bad: n/a
 **How it works:** The query keeps public TLS events that contain both client `ja4_` and server `ja4s_`. It computes client prevalence by JA4 and server prevalence by JA4S, then requires the client to be common (`cDevs >= max(3, totalDevs * 0.10)`) and the server to be rare (`sDevs <= 2` and `sConns <= 50`). It also requires a suspicious certificate signal: self-signed (`issuer == subject`) or an issuer outside the embedded known-CA list.
+
+**Sample query (excerpt):** the detection heart of `wb_serverrare.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| lookup clientPrev on ja4_
+| lookup serverPrev on ja4s_
+| where cDevs >= max_of(3, toint(totalDevs * 0.10))    // client fingerprint is COMMON across the estate
+| where sDevs <= 2 and sConns <= 50                     // server fingerprint is RARE
+| where AnySelfSigned == 1 or AnyObscureIssuer == 1     // legit public-CA servers are NOT C2 - require a suspicious cert
+| extend Verdict = case(sDevs <= 1 and AnySelfSigned == 1, "HIGH - common client to singleton self-signed server",
+                        sDevs <= 1,                        "HIGH - common client to singleton server TLS",
+                                                           "MEDIUM - common client to rare server TLS")
+| project Verdict, ClientJA4 = ja4_, ServerJA4S = ja4s_, ClientDevices = cDevs, ServerDevices = sDevs,
+          ServerConns = sConns, Devices, Conns, SelfSigned = AnySelfSigned, Dests, Issuers, FirstSeen, LastSeen
+| sort by ServerDevices asc, ClientDevices desc
+```
 **Output columns** —
 
 | Column | What it means |
@@ -584,6 +766,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1572 (Protocol Tunneling) · T1071.001 (Web Protocols)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `RemoteIP`, `RemotePort`, `DeviceId`; rarity-gated: yes (`minRarity = 0.7`); known-bad: n/a
 **How it works:** The query keeps public TLS events, computes tenant-wide JA4 rarity, and joins only JA4s with `R >= 0.7`. It removes common TLS service ports (`443`, `8443`, `9443`, mail TLS ports, DoT `853`, FTPS `990`, SIP TLS `5061`, and LDAPS `636`). It then marks rows High if any observed port is in the attacker-common `suspPorts` list.
+
+**Sample query (excerpt):** the detection heart of `wb_oddport.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let rare = perJa4
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R;
+ssl
+| where RemotePort !in (benignPorts)
+| lookup kind=inner rare on ja4_
+| summarize Conns = count(), Devices = dcount(DeviceId, 4), Ports = make_set(RemotePort, 12),
+            SNIs = make_set(sni, 8), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 8),
+            AnySuspPort = max(toint(RemotePort in (suspPorts))), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by ja4_, ja4s_, RemoteIP, R
+| extend Verdict = case(AnySuspPort == 1, "HIGH - rare JA4 on known-abused TLS port",
+                        "MEDIUM - rare JA4 on non-standard TLS port")
+| project Verdict, JA4 = ja4_, ServerJA4S = ja4s_, RemoteIP, Ports, Rarity = round(R, 2), Devices, Conns, SNIs, Dests, FirstSeen, LastSeen
+| sort by Verdict asc, Rarity desc, Devices asc
+| take 200
+```
 **Output columns** —
 
 | Column | What it means |
@@ -620,6 +824,22 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1105 (Ingress Tool Transfer) · T1195 (Supply Chain Compromise)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `AdditionalFields.server_name`, `RemoteIP`, `DeviceId`, `TimeGenerated`; rarity-gated: no; known-bad: n/a
 **How it works:** The query groups TLS events by `ja4_` and 6-hour `tbin`, counting distinct hosts (`Hosts`) and connections (`Conns`). It compares each JA4's current bin to its previous bin (`BaselineHosts`) and keeps only bins in the last `recentWindow = 3d` where `BaselineHosts <= 2`, `Hosts >= 8`, and `Growth >= 6`. This detects propagation speed, not just first-seen novelty.
+
+**Sample query (excerpt):** the detection heart of `wb_velocity.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+bins
+| order by ja4_ asc, tbin asc
+| serialize
+| extend pHosts = prev(Hosts), pJa4 = prev(ja4_)
+| extend BaselineHosts = iff(ja4_ == pJa4, coalesce(pHosts, 0), 0)
+| extend Growth = Hosts - BaselineHosts
+| where tbin > ago(recentWindow)
+| where BaselineHosts <= 2 and Hosts >= 8 and Growth >= 6
+| extend Verdict = case(BaselineHosts == 0, "HIGH - JA4 appeared on many hosts at once (zero baseline)",
+                        "HIGH - JA4 rapidly spread across the fleet")
+| project Verdict, JA4 = ja4_, SpikeTime = tbin, HostsNow = Hosts, HostsBefore = BaselineHosts, Growth, Conns, Dests
+| sort by Growth desc, SpikeTime desc
+```
 **Output columns** —
 
 | Column | What it means |
@@ -652,6 +872,25 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1572 (Protocol Tunneling) · T1071.004 (DNS)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.server_name`, `AdditionalFields.next_protocol`, `RemoteIP`, `RemotePort`, `DeviceId`, `DeviceName`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`, `InitiatingProcessVersionInfoCompanyName`; rarity-gated: no; known-bad: n/a (known DoH providers are protocol destinations, not malware indicators)
 **How it works:** The query parses `alpn = substring(ja4_, 8, 2)` and treats `alpn == "dt"` or `next_protocol == "dot"` as DNS-over-TLS, a hard protocol tell. It also detects DNS-over-HTTPS by matching SNI or IP against embedded public DoH provider lists such as Cloudflare, Google, Quad9, OpenDNS, NextDNS, AdGuard, Mullvad, and others. It joins to process attribution, suppresses expected Windows resolver/system processes and browsers, then scores LOLBIN, user-path, and unattributed cases.
+
+**Sample query (excerpt):** the detection heart of `wb_doh.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| extend isLolbin   = (Proc in~ (lolbins))
+| extend isUserPath = (ProcFolder has "appdata" or ProcFolder hasprefix "c:\\users\\" or ProcFolder has "\\temp\\" or ProcFolder has "\\downloads\\")
+| extend Signal = case(isDot, "DNS-over-TLS (dt ALPN - hard tell)", isDoh, "DoH to known provider (SNI/IP match)", "encrypted DNS")
+| summarize Devices = dcount(DeviceId, 4), Conns = count(), Procs = make_set(Proc, 8),
+            SampleDevices = make_set(DeviceName, 4), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 8),
+            AnyLolbin = max(isLolbin), AnyUserPath = max(isUserPath), AnyUnattrib = max(Proc == "(unattributed)"),
+            Signal = take_any(Signal), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by ja4_
+| extend Verdict = case(
+    AnyLolbin,   "HIGH - encrypted DNS from a LOLBIN (DNS C2 via DoH/DoT)",
+    AnyUserPath, "HIGH - encrypted DNS from a user-path binary (DNS C2 vector)",
+    AnyUnattrib, "MEDIUM - unattributed DoH/DoT (possible injected code)",
+                 "MEDIUM - non-system, non-browser process using encrypted DNS")
+| project Verdict, JA4 = ja4_, Signal, Procs, Dests, Devices, Conns, AnyLolbin, AnyUserPath, SampleDevices, FirstSeen, LastSeen
+| sort by AnyLolbin desc, AnyUserPath desc, Devices asc
+```
 **Output columns** —
 
 | Column | What it means |
@@ -690,6 +929,24 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1568 (Dynamic Resolution) · T1090 (Proxy)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `RemoteIP`, `DeviceId`; rarity-gated: yes (`minRarity = 0.7`); known-bad: n/a
 **How it works:** The query keeps public TLS events, computes tenant-wide rarity for each JA4, and keeps JA4s with `R >= 0.7`. It removes browser b-sections so normal browsers do not dominate fan-out. It summarizes destination spread by counting distinct IPs and distinct SNIs, then uses `DestSpread = max(IPs, SNIs)` to catch either IP rotation or name rotation.
+
+**Sample query (excerpt):** the detection heart of `wb_fanout.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let rare = perJa4
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R;
+// …
+| extend DestSpread = max_of(IPs, SNIs)
+| where DestSpread >= 8                                  // one rare fingerprint reaching many distinct addresses
+| extend Verdict = case(DestSpread >= 25, "HIGH - rare JA4 rotating across many destinations (C2 infra rotation / DGA)",
+                        "MEDIUM - rare JA4 spread across multiple destinations")
+| project Verdict, JA4 = ja4_, DestSpread, DistinctIPs = IPs, DistinctSNIs = SNIs, Devices, Conns,
+          Rarity = round(R, 2), ServerJA4S, Dests, FirstSeen, LastSeen
+| sort by DestSpread desc, Rarity desc
+```
 **Output columns** —
 
 | Column | What it means |
@@ -726,6 +983,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1090 (Proxy) · T1071.001 (Web Protocols)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `RemoteIP`, `DeviceId`; rarity-gated: yes (`minRarity = 0.7`); known-bad: n/a
 **How it works:** The query keeps public TLS events and removes browser b-sections before computing rare JA4s. It groups by destination `RemoteIP`, then counts how many distinct rare JA4s hit that same IP. It keeps destinations with `RareJA4s >= 4` and `Devices <= 10`, which favors campaign/staging concentration over broad CDN traffic.
+
+**Sample query (excerpt):** the detection heart of `wb_fanin.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let rare = perJa4
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R;
+ssl
+| lookup kind=inner rare on ja4_
+| summarize RareJA4s = dcount(ja4_, 4), Devices = dcount(DeviceId, 4), Conns = count(),
+            Fingerprints = make_set(ja4_, 12), ServerJA4S = make_set(ja4s_, 5), SNIs = make_set(sni, 6),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated), MaxR = max(R)
+        by RemoteIP
+| where RareJA4s >= 4 and Devices <= 10                 // many distinct rare fingerprints, concentrated on few hosts (campaign, not fleet-wide CDN)
+| extend Verdict = case(RareJA4s >= 10, "HIGH - one destination receiving many rare fingerprints (redirector / shared C2)",
+                        "MEDIUM - destination aggregating multiple rare fingerprints (staging candidate; verify it is not a shared CDN)")
+| project Verdict, RemoteIP, RareJA4s, Devices, Conns, Rarity = round(MaxR, 2), Fingerprints, ServerJA4S, SNIs, FirstSeen, LastSeen
+| sort by RareJA4s desc, Rarity desc
+| take 200
+```
 **Output columns** —
 
 | Column | What it means |
@@ -761,6 +1040,27 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1573 (Encrypted Channel) · T1071.001 (Web Protocols)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `AdditionalFields.curve`, `RemoteIP`, `DeviceId`; rarity-gated: yes (`minRarity = 0.7`); known-bad: n/a
 **How it works:** The query keeps public TLS events with a JA4, computes tenant-wide JA4 rarity, and keeps JA4s with `R >= 0.7`. It then requires a non-empty `curve` field and filters out only the three standard production TLS 1.3 groups: `x25519`, `secp256r1`, and `secp384r1` (case variants included). Any remaining curve is treated as a custom or handcrafted TLS-stack signal.
+
+**Sample query (excerpt):** the detection heart of `wb_curve.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let rare = perJa4
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R;
+ssl
+| where isnotempty(curve) and not(curve in (stdCurves))   // anything other than the three standard TLS1.3 groups
+| lookup kind=inner rare on ja4_
+| summarize Devices = dcount(DeviceId, 4), Conns = count(), Curves = make_set(curve, 6),
+            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 8), ServerJA4S = make_set(ja4s_, 5),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated), R = max(R)
+        by ja4_
+| extend Verdict = "HIGH - rare JA4 negotiating a non-standard TLS curve (custom / handcrafted TLS stack)"
+| project Verdict, JA4 = ja4_, Curves, Devices, Conns, Rarity = round(R, 2), ServerJA4S, Dests, FirstSeen, LastSeen
+| sort by Rarity desc, Conns desc
+| take 200
+```
 **Output columns** —
 
 | Column | What it means |
@@ -798,6 +1098,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, public `RemoteIP`, `AdditionalFields.ja4`) — `DeviceId`, `TimeGenerated`, `RemoteIP`, `ja4_`, `ja4s_`, `server_name`; rarity-gated: yes (`R >= minRarity`, `PairDevs >= 2`, browser b-section suppressed); second source: `AlertEvidence` (`EntityType == "Machine"`) plus `DeviceInfo` host/IP/OS enrichment.
 
 **How it works:** The query calculates tenant-relative rarity for each JA4+JA4S pair over the 30-day lookback, keeps rare pairs seen on at least two devices, and drops known browser b-sections. It marks devices with `AlertEvidence` as "dirty" and devices without matching alert evidence as "clean," then joins dirty-to-clean devices that share the same rare pair. The clean host's first sighting must be no earlier than one day before the dirty host's first sighting, and same-public-IP matches are suppressed as likely NAT/VPN overlap; if `AlertEvidence` is missing, the bridge has no alerted side and returns no rows.
+
+**Sample query (excerpt):** the detection heart of `wb_bridge.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let rare = pairAgg
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(PairDevs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(PairConns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity and PairDevs >= 2 and not(substring(ja4_, 11, 12) in (browserBsec))   // tenant-relative rarity (not a raw device count) + non-browser tool/implant
+// …
+dirty
+| join kind=inner clean on ja4_, ja4s_
+| where CleanFirst >= DirtyFirst - 1d
+| join kind=leftouter (meta | project DirtyDevice = DeviceId, DirtyName = DeviceName, DirtyIP = PublicIP, DirtyOS = OSPlatform) on DirtyDevice
+| join kind=leftouter (meta | project CleanDevice = DeviceId, CleanName = DeviceName, CleanIP = PublicIP, CleanOS = OSPlatform) on CleanDevice
+| extend SamePublicIP = (isnotempty(DirtyIP) and DirtyIP == CleanIP)
+| where not(SamePublicIP)                       // same egress IP = likely same NAT/VPN, suppress
+| extend Verdict = "HIGH - rare JA4 bridges an alerted host to a clean host (possible undetected spread)"
+| project Verdict, ClientJA4 = ja4_, ServerJA4S = ja4s_, AlertedHost = coalesce(DirtyName, DirtyDevice), CleanHost = coalesce(CleanName, CleanDevice),
+          Alerts, AlertFirst, CleanFirst, CleanSNIs, DirtyOS, CleanOS
+| sort by CleanFirst asc
+| take 200
+```
 
 **Output columns**
 
@@ -841,6 +1163,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceFileEvents` (`FileCreated`, `FileOriginUrl` populated, `SHA1` populated) — download time, file path, hash, origin/referrer; `DeviceNetworkEvents` (`SslConnectionInspected` and `ConnectionSuccess`) — JA4/JA4S, SNI, cert issuer/subject, remote flow key, initiating process/hash/signer/parent; rarity-gated: yes, or structurally gated by no-SNI/no-ALPN/self-signed/legacy TLS; second source: `DeviceFileEvents`.
 
 **How it works:** The query treats `DeviceFileEvents.FileCreated` with `FileOriginUrl` and `SHA1` as the Mark-of-the-Web download signal. It links that downloaded file to a network process by SHA1-exact match or filename match, then joins the process to a rare or structurally suspicious TLS flow on the same device and remote flow key. The TLS callout must occur after the download and within `calloutWindow` (24 hours); if `DeviceFileEvents` or origin URL/hash data is missing, this panel returns no rows.
+
+**Sample query (excerpt):** the detection heart of `wb_motw.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| extend SuspicionScore =
+      iff(selfSig,    25, 0)
+    + iff(noSNI,      20, 0)
+    + iff(legacyTLS,  20, 0)
+    + iff(noALPN,     12, 0)
+    + iff(MatchType == "SHA1-exact", 10, 5)                    // stronger correlation = bonus
+    + iff(MinutesSinceDownload < 30,  20,                      // rapid first callout (<30 min)
+      iff(MinutesSinceDownload < 240, 10, 0))                  // called out within 4 h
+    + iff(isempty(Signer), 15, 0)                              // unsigned calling process
+// …
+| project
+    DeviceName, DownloadTime, FileName, DownloadFolder, FileSHA1,
+    FileOriginUrl, FileOriginReferrerUrl,
+    Proc, ProcFolder, Signer, Parent, MatchType,
+    FirstCallout, MinutesSinceDownload, CalloutCount,
+    RemoteIP, sni, ja4_, ja4s_, issuer,
+    Rarity, SuspicionScore, Why
+| sort by SuspicionScore desc, MinutesSinceDownload asc, DownloadTime desc
+```
 
 **Output columns**
 
@@ -900,6 +1244,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 
 **How it works:** The query calculates IDF-style rarity for JA4+JA4S pairs and keeps rare public, non-Microsoft TLS connections. It joins each rare TLS connection to ASR events and Defender alert evidence on the same `DeviceId` where the timestamps fall within `detWindow` (±30 minutes). Each row is scored as `round(Rarity * 100)` plus ASR bonus and alert-severity weight; if both ASR/alert sources are missing, this panel returns no rows.
 
+**Sample query (excerpt):** the detection heart of `wb_detonation.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| extend SevWeight = case(AlertSeverity == "High",   30,
+                          AlertSeverity == "Medium",  20,
+                          AlertSeverity == "Low",     10, 0)
+| extend IncidentScore = toint(round(100.0 * Rarity))
+                       + iff(CorrobType == "ASR event", 20, 0)
+                       + SevWeight
+| extend Why = strcat(
+    "Rare JA4 (R=", tostring(Rarity), ") → ",
+    coalesce(sni, RemoteIP), " | ",
+    CorrobType, ": '", CorrobDetail, "'",
+    " within ", tostring(MinAbsGapMin), " min",
+    iff(selfSig, " | self-signed cert", ""),
+    iff(isnotempty(AlertSeverity), strcat(" [sev=", AlertSeverity, "]"), ""))
+| project
+    DeviceName, FirstSslTime, ja4_, ja4s_, sni, issuer, RemoteIP, Rarity,
+    CorrobType, CorrobDetail, CorrobContext, AlertTitle, AlertSeverity,
+    MinAbsGapMin, IncidentScore, Why
+| sort by IncidentScore desc, MinAbsGapMin asc
+```
+
 **Output columns**
 
 | Column | What it means |
@@ -949,6 +1315,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected` for JA4 rarity and `ConnectionSuccess` for process attribution) — device, flow key, initiating process/hash/signer/parent/path; `DeviceProcessEvents` (latest event per `DeviceId`, process name) — signer, folder, parent/grandparent, command line, SHA1; rarity-gated: yes; second source: `DeviceProcessEvents` with `ConnectionSuccess` as the required process-attribution join.
 
 **How it works:** The query finds rare public, non-Microsoft JA4+JA4S pairs, then attributes rare connections to processes by `DeviceId`, `RemoteIP`, and `RemotePort` using `ConnectionSuccess`. It enriches each process with the most recent `DeviceProcessEvents` record in the lookback and flags Office parents, script-host parents, browser-parent-to-non-browser-child, and unsigned user/temp/download path execution. There is no narrow ± time window beyond the 30-day lookback; if `ConnectionSuccess` process attribution is missing, the panel cannot link rare JA4 to a process, while missing `DeviceProcessEvents` leaves DPE-only fields blank and uses connection telemetry fallback.
+
+**Sample query (excerpt):** the detection heart of `wb_lineage.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| extend Severity = case(
+    officeSpawn or browserToNonBrowser, "High",   // document/browser spawning a non-browser network child
+    unsigned and isUserPath,            "High",   // unsigned binary in a user-writable path
+    scriptSpawn,                        "Medium", // script host as spawning parent
+                                        "Medium")
+| extend SuspicionScore =
+      iff(officeSpawn,          40, 0)
+    + iff(browserToNonBrowser,  35, 0)
+    + iff(scriptSpawn,          25, 0)
+    + iff(unsigned,             20, 0)
+    + iff(isUserPath,           15, 0)
+// …
+| project
+    Severity, SuspicionScore,
+    Proc, FinalParent, DPE_GParent, FinalSigner, FinalFolder, DPE_CmdLine,
+    ja4_, ja4s_, sni, issuer, Dests,
+    DeviceName, Rarity, Conns, LastSeen, Why
+| sort by SuspicionScore desc, Rarity desc, Conns asc
+```
 
 **Output columns**
 
@@ -1001,6 +1389,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 
 **How it works:** The query builds JA4 candidates when the fingerprint is rare, non-browser-shaped, or exactly matches the hard-coded Evilginx JA4. It maps devices to users through `DeviceLogonEvents.AccountName`, joins to risky Entra sign-ins by UPN prefix, and keeps rows within `aitm_window` (±30 minutes). The correlated risky-sign-in branch returns no rows without `SigninLogs` and device/user mapping; the query also surfaces the Evilginx JA4 as an explicit uncorroborated fallback so analysts can verify session theft even when the sign-in branch is sparse.
 
+**Sample query (excerpt):** the detection heart of `wb_aitm.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+    | join kind=inner devUpn on DeviceId
+    | join kind=inner risky on $left.Acct == $right.UPNPrefix
+    | where abs(ConnTime - SignInTime) <= aitm_window
+    | extend TimeGapMin = round(datetime_diff('second', ConnTime, SignInTime) / 60.0, 1)
+    | extend IsEvilginx = (ja4_ == evilginxJa4)
+    | extend Why = strcat(iff(IsEvilginx, "*** Evilginx JA4 *** ; ", ""), "risky Entra sign-in (", RiskLevel, ") for ", UPN, " + ", iff(nonBrowser, "non-browser", "rare"), " JA4 on their device within 30m; app=", AppDisplayName, "; sign-in from ", Location)
+    | project Verdict = iff(IsEvilginx, "CRITICAL - Evilginx + risky sign-in", "HIGH - AiTM session-theft pattern"),
+              UPN, DeviceName, RiskLevel, RiskState, ja4_, ja4s_, bsec, Rarity = round(R, 2), nonBrowser,
+              SignInIP, Location, AppDisplayName, SNI = sni, SignInTime, ConnTime, TimeGapMin, Why;
+// …
+    | extend Verdict = "HIGH - Evilginx JA4 (uncorroborated; verify session theft)",
+             UPN = "(unattributed)", RiskLevel = "", RiskState = "", SignInIP = "", Location = "", AppDisplayName = "",
+             SignInTime = datetime(null), TimeGapMin = real(null),
+             Why = strcat("*** Evilginx AiTM JA4 *** on device with no corroborating risky Entra sign-in in window; ", Conns, " callout(s) - verify token theft")
+    | project Verdict, UPN, DeviceName, RiskLevel, RiskState, ja4_, ja4s_, bsec, Rarity = round(R, 2), nonBrowser,
+              SignInIP, Location, AppDisplayName, SNI = sni, SignInTime, ConnTime, TimeGapMin, Why;
+union correlated, evilginxUncorr
+| sort by Verdict asc, TimeGapMin asc
+```
+
 **Output columns**
 
 | Column | What it means |
@@ -1052,6 +1462,25 @@ This reference explains what each workbook panel shows, how to read its highest-
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, public JA4) — device, public destination, JA4/JA4S, b-section, cipher count; `CloudAppEvents` (upload/download/export/share/sync/file-operation action or anonymous proxy) — app, account, object, IP, proxy/country; `DeviceInfo` — device `PublicIP` ownership window; `DeviceLogonEvents` — optional UPN enrichment; rarity-gated: yes; second source: `CloudAppEvents`.
 
 **How it works:** The query builds a rare JA4 set from public TLS connections, then filters cloud-app events to exfil-style activities or anonymous-proxy rows. It joins the device's public IP from `DeviceInfo` to `CloudAppEvents.IPAddress`, verifies the device held that IP around the callout, and keeps cloud activity within `exfil_window` (±1 hour) of the rare JA4 connection. If `CloudAppEvents` or device public-IP data is missing, the corroborated panel returns no rows.
+
+**Sample query (excerpt):** the detection heart of `wb_cloudexfil.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+rareSsl
+| join kind=inner (devicePublicIP | project DeviceId, PublicIP, IpStart, IpEnd) on DeviceId
+| where ConnTime between (IpStart - 1d .. IpEnd + 1d)   // device actually held this public IP around the callout (not just the latest IP)
+| join kind=inner cloudExfil on $left.PublicIP == $right.IPAddress
+| where abs(ExfilTime - ConnTime) <= exfil_window
+| join kind=leftouter (deviceToUpn | project DeviceId, UPN) on DeviceId
+| extend TimeGapMin = round(datetime_diff('second', ExfilTime, ConnTime) / 60.0, 1)
+| extend Why = strcat("Rare JA4 + cloud exfil from same device (PublicIP match) +/-1h",
+    iff(IsAnonymousProxy, "; *** ANONYMOUS PROXY ***", ""), "; app=", Application,
+    "; activity=", coalesce(ActivityType, ActionType), "; object=", coalesce(ObjectName, ""),
+    "; bsec=", bsec, " ciphers=", tostring(cipherCnt))
+| project Application, ActivityType, ActionType, ObjectName, AccountDisplayName, UserPrincipalName = coalesce(UPN, ""),
+          DeviceName, ja4_, ja4s_, bsec, cipherCnt, Rarity = round(R, 2), PublicIP, RemoteIP, SNI = sni,
+          IsAnonymousProxy, CountryCode, ConnTime, ExfilTime, TimeGapMin, Why
+| sort by IsAnonymousProxy desc, TimeGapMin asc, ExfilTime desc
+```
 
 **Output columns**
 
@@ -1108,6 +1537,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 
 **How it works:** The query finds delivered phish/malware email, maps the recipient prefix to all devices where that account logged on, and joins those devices to rare public JA4 callouts. It only keeps callouts after the email delivery and within `phish_window` (2 hours). If `EmailEvents` or `DeviceLogonEvents` mapping is missing, the chain returns no rows.
 
+**Sample query (excerpt):** the detection heart of `wb_phish.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let rareSet = (
+    pairAgg
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R);
+// …
+phishEmails
+| extend RecipPrefix = tolower(tostring(split(RecipientEmailAddress, "@")[0]))
+| join kind=inner (recipientDevices | project Acct, DeviceId, DeviceName) on $left.RecipPrefix == $right.Acct
+| join kind=inner (rareSsl | project DeviceId, ConnTime, RemoteIP, sni, ja4_, ja4s_, bsec, cipherCnt, R) on DeviceId
+| where ConnTime > EmailTime and (ConnTime - EmailTime) <= phish_window
+| extend MinutesFromEmail = round(datetime_diff('second', ConnTime, EmailTime) / 60.0, 1)
+| extend Why = strcat("Phish->implant chain: ", ThreatTypes, " email delivered (", SenderMailFromDomain, ") then rare JA4 callout on recipient device within 2h; detect=", DetectionMethods, "; bsec=", bsec, " ciphers=", tostring(cipherCnt))
+| project RecipientEmailAddress, Subject, ThreatTypes, DetectionMethods, SenderFromAddress, SenderMailFromDomain, EmailTime,
+          DeviceName, ja4_, ja4s_, bsec, cipherCnt, Rarity = round(R, 2), RemoteIP, SNI = sni, ConnTime, MinutesFromEmail, Why
+| sort by MinutesFromEmail asc, EmailTime desc
+```
+
 **Output columns**
 
 | Column | What it means |
@@ -1160,6 +1611,27 @@ This reference explains what each workbook panel shows, how to read its highest-
 
 **How it works:** The query bins file activity into 10-minute bursts and keeps high-volume rename/delete/create/modify patterns, especially when ransomware-like extensions appear. It calculates JA4 rarity from public TLS and joins rare callouts to file bursts on the same device within ±30 minutes. If `DeviceFileEvents` is missing or the file-operation thresholds are not met, the panel returns no rows.
 
+**Sample query (excerpt):** the detection heart of `wb_ransom.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R;
+// …
+ssl
+| lookup kind=inner rare on ja4_
+| join kind=inner burst on DeviceId
+| where ConnTime between (BurstTime - 30m .. BurstTime + 30m)
+| summarize CalloutConns = count(), Dests = make_set(coalesce(sni, tostring(RemoteIP)), 6), R = max(R),
+            FileOps = take_any(FileOps), Renames = take_any(Renames), Deletes = take_any(Deletes), RwExtHits = take_any(RwExtHits),
+            SampleFiles = take_any(SampleFiles), BurstTime = min(BurstTime) by DeviceId, DeviceName, ja4_, ja4s_
+| extend Verdict = case(RwExtHits >= 8, "CRITICAL - ransomware-extension burst + rare JA4 callout",
+                        (Renames >= 250 and Deletes >= 100) or RwExtHits >= 3, "HIGH - mass file-op burst + rare JA4 callout",
+                        "MEDIUM - moderate rename/delete burst + rare JA4 callout (possible staged / low-and-slow encryption)")
+| project Verdict, DeviceName, JA4 = ja4_, ServerJA4S = ja4s_, Rarity = round(R, 2), FileOps, Renames, Deletes, RwExtHits,
+          CalloutConns, Dests, SampleFiles, BurstTime
+| sort by RwExtHits desc, FileOps desc
+```
+
 **Output columns**
 
 | Column | What it means |
@@ -1207,6 +1679,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 
 **How it works:** The query calculates rarity for public JA4 values and marks JA4s as non-browser when the b-section is not in the browser allowlist. It infers privileged/service identity from account-name patterns because this KQL notes no `IdentityInfo` table is available, then joins rare JA4 connections to the device's last privileged/service logon within ±12 hours. If `DeviceLogonEvents` is missing or account names do not match the regex, the panel returns no rows.
 
+**Sample query (excerpt):** the detection heart of `wb_privja4.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+    | extend Rhost = iff(totalDevs  <= 1, 1.0, max_of(0.0, log(todouble(totalDevs)  / todouble(Devs))  / log(todouble(totalDevs))))
+    | extend Rconn = iff(totalConns <= 1, 1.0, max_of(0.0, log(todouble(totalConns) / todouble(Conns)) / log(todouble(totalConns))))
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity
+    | project ja4_, R;
+// …
+ssl
+| lookup kind=inner rare on ja4_
+| join kind=inner privLogon on DeviceId
+| where ConnTime between (LastLogon - 12h .. LastLogon + 12h)
+| summarize Conns = count(), FirstSeen = min(ConnTime), LastSeen = max(ConnTime),
+            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 8), PrivAccts = take_any(PrivAccts),
+            AnyNonBrowser = max(nonBrowser), R = max(R) by DeviceId, DeviceName, ja4_, ja4s_
+| extend Verdict = iff(AnyNonBrowser == 1, "HIGH - privileged/service account on device with rare NON-BROWSER JA4",
+                                            "MEDIUM - privileged/service account on device with rare JA4")
+| project Verdict, DeviceName, PrivAccounts = PrivAccts, JA4 = ja4_, ServerJA4S = ja4s_, NonBrowser = AnyNonBrowser,
+          Rarity = round(R, 2), Conns, Dests, FirstSeen, LastSeen
+| sort by Verdict asc, Rarity desc
+```
+
 **Output columns**
 
 | Column | What it means |
@@ -1246,6 +1740,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1071.001 (Web protocols) · T1102 (Web service)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `DeviceId`, `DeviceName`, `RemoteIP`, `RemotePort`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`, `InitiatingProcessVersionInfoCompanyName`; rarity-gated: yes (`minRarity = 0.7`); known-bad: n/a
 **How it works:** The query first finds rare `ja4_`+`ja4s_` pairs across the estate, then keeps only pairs that contacted public trusted SNIs such as GitHub, Discord, Telegram, Azure Blob, ngrok, or trycloudflare. It joins those rare TLS flows to `ConnectionSuccess` process attribution and suppresses expected browser and web-app processes. It labels the remaining rows by process risk: LOLBIN, user/temp path, or other non-browser process.
+
+**Sample query (excerpt):** the detection heart of `wb_lots.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+    | extend R = min_of(Rhost, Rconn)
+    | where R >= minRarity and AnyTrusted);
+// …
+| extend Verdict = case(
+    AnyLolbin,   "CRITICAL - LOLBIN to trusted cloud SNI",
+    AnyUserPath, "HIGH - user/temp-path process to trusted cloud SNI",
+                 "MEDIUM - non-browser process to trusted cloud SNI")
+| extend Why = strcat(
+    "Rare JA4 to trusted CDN/cloud from non-browser (LOTS paradox); ",
+    iff(AnyLolbin,   strcat("LOLBIN [", tostring(Procs), "]; "), ""),
+    iff(AnyUserPath, "user/temp-path proc; ", ""),
+    strcat("TLS-lib=", LibHint, "; R=", round(R, 2)))
+// Numeric sort key so CRITICAL < HIGH < MEDIUM regardless of alphabetical order.
+| extend SevOrd = case(AnyLolbin, 1, AnyUserPath, 2, 3)
+| project Verdict, ja4_, ja4s_, Why, Procs, SampleSNIs, TrustedSnis,
+          LibHint, Devices, Conns, SampleDevices, AnyLolbin, AnyUserPath,
+          ProcFolders, Rarity = round(R, 2), FirstSeen, LastSeen, SevOrd
+| sort by SevOrd asc, Devices asc, Conns asc
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
@@ -1282,6 +1798,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1573 (Encrypted Channel) · T1090 (Proxy)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `DeviceId`, `DeviceName`, `RemoteIP`, `RemotePort`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`, `InitiatingProcessVersionInfoCompanyName`; rarity-gated: no; known-bad: n/a
 **How it works:** The query looks for two ECH proxies: an outer SNI such as `cloudflare-ech.com`, `*-ech.com`, or names containing `ech.`, and JA4 strings whose SNI-position flag is `i` with browser-like ALPN `h1` or `h2` to a public IP. It joins candidate TLS flows to process names and classifies browser ECH as informational while prioritizing LOLBIN and user-path non-browser activity. `LibHint` comes from the JA4 b-section, the middle library hash in the JA4 string.
+
+**Sample query (excerpt):** the detection heart of `wb_ech.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| extend Verdict = case(
+    AnyLolbin,
+        "HIGH - ECH/no-SNI from LOLBIN (triage immediately)",
+    not(AnyBrowserProc) and AnyUserPath,
+        "MEDIUM - ECH from user-path non-browser process",
+    not(AnyBrowserProc),
+        "REVIEW - ECH from non-browser process",
+        "INFO - ECH from browser (expected; low priority)")
+// …
+| extend SevOrd = case(
+    AnyLolbin,                           1,
+    not(AnyBrowserProc) and AnyUserPath, 2,
+    not(AnyBrowserProc),                 3,
+    4)
+| project Verdict, EchCategory, ja4_, ja4s_, Why, Procs, LibHint,
+          SampleDests, SampleDevices, Devices, Conns,
+          AnyBrowserProc, AnyLolbin, AnyUserPath, FirstSeen, LastSeen, SevOrd
+| sort by SevOrd asc, Devices desc
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
@@ -1317,6 +1855,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1567 (Exfiltration Over Web Service)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `DeviceId`, `RemoteIP`, `RemotePort`, `InitiatingProcessFileName`, `InitiatingProcessFolderPath`, `InitiatingProcessVersionInfoCompanyName`; rarity-gated: no; known-bad: n/a
 **How it works:** The query extracts the JA4 b-section, which is a stable TLS-library hash, and suppresses browser stacks, OS TLS stacks, high-prevalence unknown b-sections, private IPs, and Microsoft destinations. It labels remaining public SaaS/API traffic as Python, Go, SoftEther, or unknown, then joins to process attribution. Interest level is based on whether the process is a known dev/automation tool and whether it ran from a user/temp path.
+
+**Sample query (excerpt):** the detection heart of `wb_shadowit.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+| extend Interest = case(
+    not(AnyDevProc) and AnyUserPath,
+        "HIGH-INTEREST - non-dev-tool in user/temp path",
+    not(AnyDevProc),
+        "MEDIUM-INTEREST - process not in dev-tool list",
+        "LOW-INTEREST - known dev/automation tool (expected)")
+| extend Why = strcat(
+    LibraryName, " TLS library to external SaaS/API; proc=", Proc, "; ",
+    iff(not(AnyDevProc), "NOT a known dev tool; ", "known dev tool; "),
+    iff(AnyUserPath,     "user/temp path; ", ""),
+    strcat("TLS-library b-section ", bsec))
+// SevOrd for sort: HIGH-INTEREST=1, MEDIUM=2, LOW=3
+| extend SevOrd = case(not(AnyDevProc) and AnyUserPath, 1, not(AnyDevProc), 2, 3)
+| project Interest, LibraryName, bsec, Proc, SampleSNIs, SampleFolders,
+          SampleSigners, Devices, Conns, AnyDevProc, AnyUserPath,
+          Why, FirstSeen, LastSeen, SevOrd
+| sort by SevOrd asc, Devices desc, Conns desc
+| project-away SevOrd
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
@@ -1350,6 +1910,20 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** n/a - compliance inventory
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.server_name`, `DeviceId`, `DeviceName`, `RemoteIP`, `RemotePort`, `InitiatingProcessFileName`; rarity-gated: no; known-bad: n/a
 **How it works:** The query reads the JA4 version field and keeps only legacy TLS/SSL codes. It marks whether the remote IP is public, then joins the legacy flows to process names. Results are summarized by TLS version, JA4 value, and remote port so you can see affected clients and destinations.
+
+**Sample query (excerpt):** the detection heart of `wb_deprecated.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+ssl
+| join hint.shufflekey=DeviceId kind=leftouter procs on DeviceId, RemoteIP, RemotePort
+| extend TLSVersion = case(tlsVer == "10", "TLS 1.0", tlsVer == "11", "TLS 1.1", tlsVer == "s3", "SSL 3.0", "SSL 2.0")
+| summarize Connections = count(), Devices = dcount(DeviceId, 4), SampleDevices = make_set(DeviceName, 5),
+            SampleProcs = make_set(Proc, 5), SampleDests = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+            AnyPublic = max(isPublic), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by TLSVersion, ja4_, RemotePort
+| extend Concern = iff(AnyPublic, "PUBLIC legacy-TLS (PCI/FedRAMP concern)", "internal legacy-TLS")
+| project TLSVersion, Concern, ja4_, RemotePort, Devices, Connections, SampleProcs, SampleDevices, SampleDests, FirstSeen, LastSeen
+| sort by Devices desc, Connections desc
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
@@ -1379,6 +1953,24 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1595 (Active Scanning)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.server_name`, `DeviceId`, `DeviceName`, `RemoteIP`, `RemotePort`, `InitiatingProcessFileName`; rarity-gated: no; known-bad: n/a
 **How it works:** The query decodes JA4 protocol, TLS version, ALPN, cipher count, and extension count. It flags five rule families: TLS 1.0/1.1 with ALPN, legacy TLS with more than 60 ciphers, zero TLS extensions to a public destination, QUIC on a port other than 80 or 443, and JA4 values starting with `t11d6911h9`. It joins only flagged flows to process names and summarizes by `ja4_`.
+
+**Sample query (excerpt):** the detection heart of `wb_impossible.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+ssl
+| join hint.shufflekey=DeviceId kind=leftouter procs on DeviceId, RemoteIP, RemotePort
+| extend Reason = strcat(
+    iff(r_tls11alpn, "legacy-TLS with ALPN (impossible); ", ""),
+    iff(r_legacyManyCiph, "legacy-TLS catch-all cipher list (scanner); ", ""),
+    iff(r_noExtPub, "zero TLS extensions to public; ", ""),
+    iff(r_quicNonStd, "QUIC on non-standard port; ", ""),
+    iff(r_scanner, "known mass-scanner prefix; ", ""))
+| summarize Connections = count(), Devices = dcount(DeviceId, 4), SampleDevices = make_set(DeviceName, 5),
+            SampleProcs = make_set(Proc, 5), SampleDests = make_set(coalesce(sni, tostring(RemoteIP)), 6),
+            AnyPublic = max(isPublic), Reason = take_any(Reason), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by ja4_
+| project ja4_, Reason, Devices, Connections, AnyPublic, SampleProcs, SampleDevices, SampleDests, FirstSeen, LastSeen
+| sort by Connections desc
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
@@ -1409,6 +2001,28 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** n/a - hygiene inventory
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `DeviceId`, `DeviceName`; `DeviceInfo` — `OSPlatform`; rarity-gated: no; known-bad: n/a
 **How it works:** The query builds one per-device/per-JA4 aggregate, then joins the device's latest `OSPlatform` from `DeviceInfo`. One branch flags impossible OS/library combinations: Safari/WebKit b-section outside Apple platforms, or WinINET/WinHTTP b-sections outside Windows. The other branch flags the top devices whose distinct JA4 count is greater than three times the fleet median.
+
+**Sample query (excerpt):** the detection heart of `wb_hygiene.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+let contradictions =
+    perDJ
+    | where ja4_ contains "a09f3c656075" or ja4_ contains "d83cc789557e" or ja4_ contains "76e208dd3e22"
+    | join kind=inner devInfo on DeviceId
+    | where isnotempty(OSPlatform)
+    | extend libIsSafari = (ja4_ contains "a09f3c656075"), libIsWinINET = (ja4_ contains "d83cc789557e"), libIsWinHTTP = (ja4_ contains "76e208dd3e22")
+    | extend libLabel = case(libIsSafari, "Safari/WebKit (Apple-only, b=a09f3c656075)", libIsWinINET, "WinINET (Windows-only, b=d83cc789557e)", libIsWinHTTP, "WinHTTP (Windows-only, b=76e208dd3e22)", "other")
+    | extend isContradiction = ((libIsSafari and not(OSPlatform in~ ("macOS","iOS"))) or (libIsWinINET and not(OSPlatform startswith "Windows")) or (libIsWinHTTP and not(OSPlatform startswith "Windows")))
+    | where isContradiction
+    | summarize DeviceName = take_any(DeviceName), OSPlatform = take_any(OSPlatform), ContradictingJA4s = make_set(ja4_, 10), DistinctJA4s = dcount(ja4_, 4), ContraLibs = make_set(libLabel, 5), Conns = sum(Conns), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen) by DeviceId
+    | extend Reason = strcat("OSPlatform=", OSPlatform, " emitting library mismatch: ", strcat_array(ContraLibs, "; "), " (", tostring(DistinctJA4s), " contradicting JA4(s)) - WSL/Wine/cross-compiled implant or uTLS fingerprint spoof")
+    | project FindingType = "OS-Fingerprint Contradiction", DeviceId, DeviceName, OSPlatform, DistinctJA4s, SampleJA4s = ContradictingJA4s, Conns, Reason, FirstSeen, LastSeen;
+// …
+union contradictions, proliferators
+| extend FTypeOrder = iff(FindingType == "OS-Fingerprint Contradiction", 1, 2)
+| project FindingType, DeviceName, DeviceId, OSPlatform, DistinctJA4s, SampleJA4s, Conns, Reason, FirstSeen, LastSeen, FTypeOrder
+| sort by FTypeOrder asc, DistinctJA4s desc, Conns desc
+| project-away FTypeOrder
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
@@ -1437,6 +2051,19 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** n/a - reference
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`, `ConnectionSuccess`) — `AdditionalFields.ja4`, `AdditionalFields.server_name`, `DeviceId`, `RemoteIP`, `RemotePort`, `InitiatingProcessFileName`, `InitiatingProcessVersionInfoCompanyName`; rarity-gated: no; known-bad: n/a
 **How it works:** The query maps JA4 b-sections to known TLS libraries such as Chromium, Firefox, Safari/WebKit, Python, Go, WinINET, WinHTTP, and SoftEther. It joins TLS flows to process names and signers, then summarizes by process, library, and b-section. At very large scale the process join samples up to 5,000 SSL devices, so common pairs are preserved but per-device counts can be representative rather than exhaustive.
+
+**Sample query (excerpt):** the detection heart of `wb_baseline.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+ssl
+| join hint.shufflekey=DeviceId kind=inner procs on DeviceId, RemoteIP, RemotePort
+| lookup kind=leftouter libMap on bsec
+| extend Library = coalesce(lib, strcat("other (", bsec, ")"))
+| summarize DistinctDevices = dcount(DeviceId, 4), TotalConns = sum(Conns), DistinctJA4s = dcount(ja4_, 4),
+            Signers = make_set(Signer, 3), SampleSNIs = make_set(sni, 6), FirstSeen = min(FirstSeen), LastSeen = max(LastSeen)
+        by Proc, Library, bsec
+| project Proc, Library, bsec, DistinctDevices, TotalConns, DistinctJA4s, Signers, SampleSNIs, FirstSeen, LastSeen
+| sort by DistinctDevices desc, TotalConns desc
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
@@ -1461,6 +2088,23 @@ This reference explains what each workbook panel shows, how to read its highest-
 **MITRE ATT&CK:** T1071.001 (Web protocols)
 **Reads:** `DeviceNetworkEvents` (`SslConnectionInspected`) — `AdditionalFields.ja4`, `AdditionalFields.ja4s`, `AdditionalFields.server_name`, `AdditionalFields.issuer`, `AdditionalFields.subject`, `DeviceId`, `DeviceName`, `RemoteIP`; rarity-gated: no; known-bad: opt-in
 **How it works:** This panel runs only when the workbook's **Known-bad lookup** toggle is **On**. It uses static embedded datatables derived from FoxIO's public `ja4plus-mapping` data, not a live feed or premium feed; families in the embedded mapping include Sliver, IcedID, Cobalt Strike, SoftEther, and Evilginx. Exact `ja4_` + `ja4s_` pair matches are CRITICAL; distinctive single-JA4 and self-signed public C2-class certificate structures are surfaced for corroboration or review.
+
+**Sample query (excerpt):** the detection heart of `wb_malware.kql` (the full query ships in the workbook panel; in the deployed workbook `lookback`/`minRarity` are bound to the **Lookback window** / **Min rarity** dropdowns):
+```kql
+union pairHits, singleHits, certHits
+| summarize Devices = dcount(DeviceId, 4), DeviceNames = make_set(DeviceName, 5), Conns = count(),
+            Dests = make_set(coalesce(sni, tostring(RemoteIP)), 5), Issuers = make_set(issuer, 3), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+        by Family, MatchType, ja4_, ja4s_
+| extend Verdict = case(MatchType == "JA4X-approx (cert structure)", "REVIEW - C2-class cert structure (verify)",
+                        MatchType == "JA4 (distinctive)" and Family startswith "Evilginx", "HIGH - AiTM JA4 (corroborate sign-in)",
+                        "CRITICAL - known malware fingerprint")
+| extend Why = case(
+    MatchType == "JA4+JA4S pair", strcat("exact client JA4 ", ja4_, " + server JA4S ", ja4s_, " match the ", Family, " known-bad pair in FoxIO ja4plus-mapping (documented C2 client+server)"),
+    MatchType == "JA4 (distinctive)", strcat("client JA4 ", ja4_, " is the distinctive ", Family, " fingerprint (FoxIO ja4plus-mapping)"),
+    "self-signed cert (issuer = subject, no Organization/Country field) to a public host = C2-class cert structure seen in Sliver/Havoc/Qakbot; verify the issuer")
+| project Verdict, Family, Why, MatchType, ja4_, ja4s_, Devices, DeviceNames, Conns, Dests, Issuers, FirstSeen, LastSeen
+| sort by Verdict asc, Conns desc
+```
 **Output columns** —
 | Column | What it means |
 |---|---|
